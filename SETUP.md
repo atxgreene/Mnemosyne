@@ -34,13 +34,18 @@ The script lives at `C:\Users\austi\AppData\Mnemosyne-Setup\install-mnemosyne.sh
 bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/install-mnemosyne.sh
 ```
 
-Optional overrides:
+Optional overrides (all env vars):
 ```bash
 MODEL=llama3.1:8b PROJECTS_DIR=$HOME/code/mnemosyne \
   bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/install-mnemosyne.sh
+
+# Skip the ~2GB CUDA torch download — install CPU-only wheels (~200MB) instead.
+# Useful on hosts without GPU passthrough or when you don't care about
+# embedding-model speed.
+CPU_TORCH=1 bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/install-mnemosyne.sh
 ```
 
-The script is **idempotent** — re-running it pulls latest from both repos, re-syncs deps, and skips anything already done.
+The script is **idempotent** — re-running it pulls latest from both repos, re-syncs deps, and skips anything already done. Partial-failure re-runs always re-write the `eternalcontext.pth` link via an `EXIT` trap, so a crashed run never leaves the venv in a half-linked state.
 
 ## What it does, in order
 
@@ -48,11 +53,13 @@ The script is **idempotent** — re-running it pulls latest from both repos, re-
 2. Installs Ollama (official script) if missing; starts `ollama serve` if the daemon isn't responding on `:11434`.
 3. Pulls `qwen3:8b` (or your override) if not already present.
 4. Creates `~/projects/mnemosyne/`, clones both repos.
+4b. **Patches** `fantastic-disco/pyproject.toml` — upstream ships `build-backend = "setuptools.backends._legacy:_Backend"` which doesn't exist; rewritten to `setuptools.build_meta` before pip ever sees it.
 5. Creates venv at `~/projects/mnemosyne/.venv`.
+5b. **Writes `eternalcontext.pth` early** (before any `pip install`) and re-writes on `EXIT` so partial-failure re-runs always self-heal.
+5c. If `CPU_TORCH=1`, installs CPU-only torch wheels from the pytorch CPU index *before* the eternal-context requirements, so pip sees torch as already-satisfied and skips the ~2GB CUDA download.
 6. `pip install -r eternal-context/skills/eternal-context/requirements.txt`
 7. `pip install -e fantastic-disco[dev]`
-8. Drops a `.pth` file into the venv so `import eternalcontext` works from anywhere.
-9. Smoke-tests both imports.
+8. Smoke-tests both imports (`import eternalcontext, mnemosyne`).
 
 ## After install
 
@@ -104,9 +111,54 @@ PY=python3.11 bash install-mnemosyne.sh   # then edit the script's python3 calls
 
 **`Ollama failed to start`** → check `/tmp/ollama.log`. Most common cause: another process on :11434, or WSL2 systemd not enabled. Workaround: `nohup ollama serve &` manually.
 
-**`sentence-transformers` install hangs** → it pulls torch (~2 GB). Be patient; consider `pip install --no-cache-dir` if you're disk-constrained.
+**`sentence-transformers` install hangs** → it pulls torch (~2 GB CUDA wheels by default). Re-run with `CPU_TORCH=1` to use the CPU-only index instead (~200 MB), or `pip install --no-cache-dir` if you're disk-constrained.
 
-**`ImportError: No module named 'eternalcontext'`** → the `.pth` link didn't write. Fix: `echo $HOME/projects/mnemosyne/eternal-context/skills/eternal-context >> $(python -c 'import site;print(site.getsitepackages()[0])')/eternalcontext.pth`
+**`ImportError: No module named 'eternalcontext'`** → the `.pth` link didn't write. The bootstrap now writes it both early (before pip install) and again on `EXIT` via a trap, so this should never happen on a fresh run. If it does, just re-run the bootstrap — it will rewrite the link without re-installing anything.
+
+**`pip install -e fantastic-disco[dev]` fails with `Cannot import 'setuptools.backends._legacy'`** → upstream pyproject.toml bug. The bootstrap auto-patches this on clone (step 4b). If you cloned manually, run:
+```bash
+sed -i 's|setuptools\.backends\._legacy:_Backend|setuptools.build_meta|' \
+  ~/projects/mnemosyne/fantastic-disco/pyproject.toml
+```
+
+## Open decisions (post-install)
+
+These can't be answered by the bootstrap script — they need a first-run walkthrough on the target host. Recording them here so we don't lose them.
+
+### 1. Channel + credentials
+
+The bootstrap creates an empty venv-side environment. It does **not** create `~/projects/mnemosyne/.env`, because credentials must never live inside either repo and the right channel set depends on you. Pick at least one of the four channels eternal-context exposes:
+
+| Channel | Required env vars | Notes |
+|---|---|---|
+| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` | Lowest-friction. BotFather token + your numeric chat ID. |
+| Discord | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` | Needs a Discord application + bot user with message-content intent. |
+| Slack | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET` | Socket Mode is easiest in WSL — no inbound webhook to expose. |
+| REST | `MNEMOSYNE_REST_HOST`, `MNEMOSYNE_REST_PORT` | Local-only HTTP. Good for scripts and CLI clients. Default `127.0.0.1:8765`. |
+
+Once decided, drop them in `~/projects/mnemosyne/.env` (mode `600`) and load it from your shell rc or via `set -a; . ~/projects/mnemosyne/.env; set +a` before launching the agent. **Never** commit `.env` to either repo.
+
+### 2. Entrypoint: `eternalcontext` direct vs. `mnemosyne` ConsciousnessLoop
+
+Two valid boot paths:
+
+- **`python -m eternalcontext`** — base agent only. ICMS, SDI, tools, channels. Skips the consciousness layer entirely. Use this first to verify the stack is healthy and Ollama is reachable.
+- **`python -m mnemosyne`** (or programmatic `from mnemosyne import ConsciousnessLoop`) — wraps eternalcontext with TurboQuant, metacognition, dream consolidation, autobiography, behavioral coupling. This is the actual product surface.
+
+Recommendation: validate `python -m eternalcontext` boots first (proves Ollama, ICMS, channel adapter, .pth link, requirements). Then switch the daily-driver entrypoint to `ConsciousnessLoop` once you've confirmed the consciousness extensions don't error on your machine. Don't make the switch as the *first* run — too many things can fail at once.
+
+### 3. First-run validation checklist
+
+Run this from `~/projects/mnemosyne/eternal-context/skills/eternal-context` after `source ~/projects/mnemosyne/.venv/bin/activate`:
+
+```bash
+ollama list                       # confirm qwen3:8b row exists
+python -c "import eternalcontext, mnemosyne; print('imports ok')"
+python -m eternalcontext --help   # confirm CLI loads (no traceback)
+python -m eternalcontext          # boot the REPL — should hit Ollama on first prompt
+```
+
+A successful boot proves: venv intact, .pth link working, eternal-context requirements installed, fantastic-disco editable install resolving, Ollama daemon up, model present. If any step fails, re-run the bootstrap — it's idempotent.
 
 ## Security note
 
