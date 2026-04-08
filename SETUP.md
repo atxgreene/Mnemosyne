@@ -61,22 +61,49 @@ The script is **idempotent** — re-running it pulls latest from both repos, re-
 7. `pip install -e fantastic-disco[dev]`
 8. Smoke-tests both imports (`import eternalcontext, mnemosyne`).
 
-## After install
+## Configure channels (wizard)
+
+After the bootstrap finishes, run the interactive wizard to set up channel credentials:
+
+```bash
+bash /mnt/c/Users/austi/AppData/Mnemosyne-Setup/mnemosyne-wizard.sh
+```
+
+The wizard:
+
+1. **LLM backend** — confirms `OLLAMA_HOST` + `OLLAMA_MODEL`, validates the daemon is responding and the model is pulled.
+2. **Telegram channel** — prompts for a bot token, validates it against `https://api.telegram.org/bot<token>/getMe`, then auto-detects your chat ID by polling `getUpdates` after you message the bot. (Other channels — Discord/Slack/REST — are roadmap; the wizard preserves any keys you add by hand.)
+3. **Obsidian skill (preview)** — captures `OBSIDIAN_VAULT_PATH` for the upcoming Obsidian skill. Only writes the env var; the skill module itself isn't wired up yet (see roadmap below).
+4. **Writes `~/projects/mnemosyne/.env`** with mode `600`, backing up any previous version to `.env.bak.<timestamp>`.
+
+The wizard is **safe to re-run** — it reads the existing `.env`, offers current values as defaults, and preserves any keys it doesn't manage (so Discord/Slack/REST credentials you add by hand survive a re-run). Nothing in `.env` is ever committed to either repo.
+
+## Boot the agent
 
 ```bash
 source ~/projects/mnemosyne/.venv/bin/activate
+set -a; . ~/projects/mnemosyne/.env; set +a   # load wizard-written creds
 
-# CLI REPL (the main interactive agent)
+# CLI REPL (base agent — proves the stack is healthy)
 cd ~/projects/mnemosyne/eternal-context/skills/eternal-context
 python -m eternalcontext
 
-# Multi-channel server (only if you set TELEGRAM_BOT_TOKEN / etc. first)
+# Multi-channel server (uses Telegram if you configured it via the wizard)
 python -m eternalcontext.server
 
 # Run consciousness-extension tests
 cd ~/projects/mnemosyne/fantastic-disco
 pytest mnemosyne/tests/ -v
 ```
+
+### Entrypoint choice: base agent vs. ConsciousnessLoop
+
+Two valid boot paths once the venv is ready:
+
+- **`python -m eternalcontext`** — base agent only. ICMS, SDI, tools, channels. Skips the consciousness layer. Use this **first** to verify Ollama, ICMS, the `.pth` link, and the channel adapter all work.
+- **`python -m mnemosyne`** (or programmatic `from mnemosyne import ConsciousnessLoop`) — wraps `eternalcontext` with TurboQuant, metacognition, dream consolidation, autobiography, behavioral coupling. This is the actual product surface.
+
+Recommendation: validate `python -m eternalcontext` first; switch the daily-driver entrypoint to `ConsciousnessLoop` only after you've confirmed the base agent is healthy. Don't make the switch as the *first* run — too many things can fail at once.
 
 ## How this co-exists with OpenClaw
 
@@ -121,33 +148,7 @@ sed -i 's|setuptools\.backends\._legacy:_Backend|setuptools.build_meta|' \
   ~/projects/mnemosyne/fantastic-disco/pyproject.toml
 ```
 
-## Open decisions (post-install)
-
-These can't be answered by the bootstrap script — they need a first-run walkthrough on the target host. Recording them here so we don't lose them.
-
-### 1. Channel + credentials
-
-The bootstrap creates an empty venv-side environment. It does **not** create `~/projects/mnemosyne/.env`, because credentials must never live inside either repo and the right channel set depends on you. Pick at least one of the four channels eternal-context exposes:
-
-| Channel | Required env vars | Notes |
-|---|---|---|
-| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` | Lowest-friction. BotFather token + your numeric chat ID. |
-| Discord | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` | Needs a Discord application + bot user with message-content intent. |
-| Slack | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET` | Socket Mode is easiest in WSL — no inbound webhook to expose. |
-| REST | `MNEMOSYNE_REST_HOST`, `MNEMOSYNE_REST_PORT` | Local-only HTTP. Good for scripts and CLI clients. Default `127.0.0.1:8765`. |
-
-Once decided, drop them in `~/projects/mnemosyne/.env` (mode `600`) and load it from your shell rc or via `set -a; . ~/projects/mnemosyne/.env; set +a` before launching the agent. **Never** commit `.env` to either repo.
-
-### 2. Entrypoint: `eternalcontext` direct vs. `mnemosyne` ConsciousnessLoop
-
-Two valid boot paths:
-
-- **`python -m eternalcontext`** — base agent only. ICMS, SDI, tools, channels. Skips the consciousness layer entirely. Use this first to verify the stack is healthy and Ollama is reachable.
-- **`python -m mnemosyne`** (or programmatic `from mnemosyne import ConsciousnessLoop`) — wraps eternalcontext with TurboQuant, metacognition, dream consolidation, autobiography, behavioral coupling. This is the actual product surface.
-
-Recommendation: validate `python -m eternalcontext` boots first (proves Ollama, ICMS, channel adapter, .pth link, requirements). Then switch the daily-driver entrypoint to `ConsciousnessLoop` once you've confirmed the consciousness extensions don't error on your machine. Don't make the switch as the *first* run — too many things can fail at once.
-
-### 3. First-run validation checklist
+## First-run validation checklist
 
 Run this from `~/projects/mnemosyne/eternal-context/skills/eternal-context` after `source ~/projects/mnemosyne/.venv/bin/activate`:
 
@@ -158,7 +159,22 @@ python -m eternalcontext --help   # confirm CLI loads (no traceback)
 python -m eternalcontext          # boot the REPL — should hit Ollama on first prompt
 ```
 
-A successful boot proves: venv intact, .pth link working, eternal-context requirements installed, fantastic-disco editable install resolving, Ollama daemon up, model present. If any step fails, re-run the bootstrap — it's idempotent.
+A successful boot proves: venv intact, `.pth` link working, eternal-context requirements installed, fantastic-disco editable install resolving, Ollama daemon up, model present. If any step fails, re-run the bootstrap — it's idempotent.
+
+## Roadmap: Obsidian skill
+
+The wizard captures `OBSIDIAN_VAULT_PATH` in `.env` so the path is ready. The actual skill module is **not yet implemented** — it needs to be added to `eternal-context/skills/` and registered with the agent's tool registry.
+
+Open questions before writing the skill module (paste answers / a representative existing skill into the next session):
+
+1. **Skill interface.** What shape do skills under `eternal-context/skills/*` actually take? Is each skill a Python module exposing a registry-discoverable class, a YAML manifest with code-behind, a folder with `__init__.py` + `tool.py`, or something else? The Obsidian skill should mirror whatever pattern the existing 11 tools use.
+2. **Indexing strategy.** v1 should be **ripgrep** over the vault (fast, deterministic, no model dependency). Vector embeddings via sentence-transformers can be a v2 if ripgrep proves insufficient — torch is already in the venv either way.
+3. **Read-only or read-write?** Recommend **read-only for v1**. Daily-note appending and link rewriting are useful but blast-radius-large; better to land them as a separate `obsidian-write` skill once the read path is solid.
+4. **Frontmatter.** Should YAML frontmatter (tags, aliases, dataview fields) be exposed as separate query surfaces (e.g. `search_by_tag`), or treated as flat text inside the note body for v1? Lean v1: flat text. v2: structured.
+5. **Tool surface.** Reasonable v1 tools: `obsidian_search(query, limit=10)`, `obsidian_read(path)`, `obsidian_list_recent(days=7)`. All read from `OBSIDIAN_VAULT_PATH`. No write tools.
+6. **WSL path translation.** If the vault lives on the Windows side (`/mnt/c/Users/austi/Documents/Obsidian`), file watch performance is mediocre. Acceptable for v1 (queries only). If it becomes a problem, mirror to a WSL-native path or use `inotify` against the `/mnt/c` path with a longer poll interval.
+
+Once you can paste an existing skill file from `eternal-context/skills/`, the Obsidian skill drops in alongside it as a small additional module. The wizard already wires the env var.
 
 ## Security note
 

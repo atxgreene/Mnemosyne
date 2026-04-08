@@ -29,6 +29,9 @@
 
 set -euo pipefail
 
+# Resolve where this script lives so we can point at sibling files (wizard).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ---- Config (override via env vars) ------------------------------------------
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects/mnemosyne}"
 MODEL="${MODEL:-qwen3:8b}"
@@ -211,15 +214,16 @@ Local model:  $MODEL  (Ollama on http://127.0.0.1:11434)
 Next steps:
   source $VENV/bin/activate
 
-  # CLI REPL (base agent)
+  # 1. Configure Telegram (and Obsidian path) interactively:
+  bash $SCRIPT_DIR/mnemosyne-wizard.sh
+
+  # 2. Load the .env the wizard wrote and boot the base agent:
+  set -a; . $PROJECTS_DIR/.env; set +a
   cd $PROJECTS_DIR/eternal-context/skills/eternal-context
   python -m eternalcontext
 
-  # Multi-channel server (Telegram/Discord/Slack/REST) — needs env vars first
+  # Multi-channel server (Telegram/Discord/Slack/REST) — needs the env loaded above
   python -m eternalcontext.server
-
-  # Run the fantastic-disco dashboard (if it has one)
-  cd $PROJECTS_DIR/fantastic-disco/dashboard && ls
 
   # Tests for the consciousness extensions
   cd $PROJECTS_DIR/fantastic-disco && pytest mnemosyne/tests/ -v
