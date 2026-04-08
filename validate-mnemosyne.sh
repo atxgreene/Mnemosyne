@@ -48,8 +48,10 @@ note() { [ "$QUIET" = 1 ] || printf '%s    %s%s\n' "$c_dim" "$*" "$c_off"; }
 # Load .env so OLLAMA_HOST/OLLAMA_MODEL etc. are available — but don't choke
 # if it's missing (validate should still work for partial installs).
 if [ -f "$ENV_FILE" ]; then
+  set -a
   # shellcheck disable=SC1090
-  set -a; . "$ENV_FILE"; set +a
+  . "$ENV_FILE"
+  set +a
 fi
 OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
 OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3:8b}"

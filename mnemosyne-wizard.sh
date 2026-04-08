@@ -278,16 +278,25 @@ OLLAMA_STATUS=$(ollama_check "$OLLAMA_HOST" "$OLLAMA_MODEL" 2>/dev/null)
 OLLAMA_STATUS="${OLLAMA_STATUS:-unreachable}"
 case "$OLLAMA_STATUS" in
   present)
-    [ "$TUI" = 1 ] && tui_msg "Ollama" "Daemon at $OLLAMA_HOST is responding.\nModel '$OLLAMA_MODEL' is present." \
-                  || ok "Ollama responding; model $OLLAMA_MODEL present"
+    if [ "$TUI" = 1 ]; then
+      tui_msg "Ollama" "Daemon at $OLLAMA_HOST is responding.\nModel '$OLLAMA_MODEL' is present."
+    else
+      ok "Ollama responding; model $OLLAMA_MODEL present"
+    fi
     ;;
   missing)
-    [ "$TUI" = 1 ] && tui_msg "Ollama" "Daemon is up but model '$OLLAMA_MODEL' is not pulled.\n\nPull it with:\n  ollama pull $OLLAMA_MODEL" \
-                  || warn "Model $OLLAMA_MODEL not in ollama list — pull with: ollama pull $OLLAMA_MODEL"
+    if [ "$TUI" = 1 ]; then
+      tui_msg "Ollama" "Daemon is up but model '$OLLAMA_MODEL' is not pulled.\n\nPull it with:\n  ollama pull $OLLAMA_MODEL"
+    else
+      warn "Model $OLLAMA_MODEL not in ollama list — pull with: ollama pull $OLLAMA_MODEL"
+    fi
     ;;
   *)
-    [ "$TUI" = 1 ] && tui_msg "Ollama" "Daemon at $OLLAMA_HOST is not responding.\n\nThe wizard will still write your config — start Ollama later." \
-                  || warn "Ollama at $OLLAMA_HOST not responding (config will still be written)"
+    if [ "$TUI" = 1 ]; then
+      tui_msg "Ollama" "Daemon at $OLLAMA_HOST is not responding.\n\nThe wizard will still write your config — start Ollama later."
+    else
+      warn "Ollama at $OLLAMA_HOST not responding (config will still be written)"
+    fi
     ;;
 esac
 

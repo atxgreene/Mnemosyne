@@ -2,13 +2,14 @@
 
 Reproducible bootstrap for the Mnemosyne local-agent stack on WSL2 / Ubuntu / Linux.
 
-This repo holds three small scripts:
+This repo holds four small scripts:
 
 | Script | Role |
 |---|---|
 | `install-mnemosyne.sh` | Unattended bootstrap. Installs Ollama, pulls a model, clones both upstream repos, builds a Python venv, smoke-tests the imports. Idempotent. |
 | `mnemosyne-wizard.sh` | Interactive post-install wizard (whiptail TUI with text fallback). Configures channel credentials and writes `~/projects/mnemosyne/.env`. |
 | `validate-mnemosyne.sh` | Health-check. Runs four checks (Ollama daemon, model present, Python imports, agent CLI loads) and exits non-zero on failure. Useful for `make check` / CI. |
+| `obsidian-search.py` | Interface-agnostic Obsidian vault helper. `search` / `read` / `list-recent` subcommands, read-only, path-traversal safe, JSON or human output. Uses ripgrep if available, pure-Python fallback otherwise. Meant to be wrapped by a thin `eternal-context` skill — see [`SETUP.md`](./SETUP.md#obsidian-skill). |
 
 The two Python packages live in their own repos and are cloned by the bootstrap:
 

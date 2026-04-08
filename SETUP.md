@@ -176,20 +176,75 @@ python -m eternalcontext          # boot the REPL — should hit Ollama on first
 
 A successful boot proves: venv intact, `.pth` link working, eternal-context requirements installed, fantastic-disco editable install resolving, Ollama daemon up, model present. If any step fails, re-run the bootstrap — it's idempotent.
 
-## Roadmap: Obsidian skill
+## Obsidian skill
 
-The wizard captures `OBSIDIAN_VAULT_PATH` in `.env` so the path is ready. The actual skill module is **not yet implemented** — it needs to be added to `eternal-context/skills/` and registered with the agent's tool registry.
+The search/read logic ships here as `obsidian-search.py` — an interface-agnostic, stdlib-only Python helper. It works as a CLI today, and can be wrapped in whatever shape `eternal-context/skills/*` expects once you paste a representative existing skill.
 
-Open questions before writing the skill module (paste answers / a representative existing skill into the next session):
+### What the helper does
 
-1. **Skill interface.** What shape do skills under `eternal-context/skills/*` actually take? Is each skill a Python module exposing a registry-discoverable class, a YAML manifest with code-behind, a folder with `__init__.py` + `tool.py`, or something else? The Obsidian skill should mirror whatever pattern the existing 11 tools use.
-2. **Indexing strategy.** v1 should be **ripgrep** over the vault (fast, deterministic, no model dependency). Vector embeddings via sentence-transformers can be a v2 if ripgrep proves insufficient — torch is already in the venv either way.
-3. **Read-only or read-write?** Recommend **read-only for v1**. Daily-note appending and link rewriting are useful but blast-radius-large; better to land them as a separate `obsidian-write` skill once the read path is solid.
-4. **Frontmatter.** Should YAML frontmatter (tags, aliases, dataview fields) be exposed as separate query surfaces (e.g. `search_by_tag`), or treated as flat text inside the note body for v1? Lean v1: flat text. v2: structured.
-5. **Tool surface.** Reasonable v1 tools: `obsidian_search(query, limit=10)`, `obsidian_read(path)`, `obsidian_list_recent(days=7)`. All read from `OBSIDIAN_VAULT_PATH`. No write tools.
-6. **WSL path translation.** If the vault lives on the Windows side (e.g. `/mnt/c/Users/<you>/Documents/Obsidian`), file-watch performance over `9p` is mediocre. Acceptable for v1 (queries are point-in-time). If it becomes a problem, mirror to a WSL-native path under `~/` or use `inotify` against the `/mnt/c` path with a longer poll interval.
+```bash
+# Full-text search (uses ripgrep if installed, falls back to pure Python)
+./obsidian-search.py search "daily note"                 # human output
+./obsidian-search.py search "project alpha" --limit 5 --json   # machine output
 
-Once you can paste an existing skill file from `eternal-context/skills/`, the Obsidian skill drops in alongside it as a small additional module. The wizard already wires the env var.
+# Read a note (refuses paths outside the vault)
+./obsidian-search.py read Projects/mnemosyne.md
+
+# Notes modified in the last N days
+./obsidian-search.py list-recent --days 7
+./obsidian-search.py list-recent --days 1 --json
+```
+
+Reads `OBSIDIAN_VAULT_PATH` from the environment (the wizard writes it), or `--vault` on the CLI. Zero dependencies beyond the Python stdlib. Exit codes: `0` ok, `2` usage, `3` path safety violation, `4` IO error.
+
+### Security properties
+
+- **Read-only.** No subcommand writes to the vault.
+- **Path-traversal safe.** `read` resolves paths and refuses anything outside the vault root (`..`, absolute paths escaping the vault, symlinks that resolve out → all rejected with exit `3`). Tested against `../../../etc/passwd` and `/etc/passwd`.
+- **Hidden dirs skipped.** `.obsidian/`, `.git/`, `.trash/`, and anything else starting with `.` is excluded from search and list-recent so config files never surface as results.
+- **No shell interpolation of user input.** The ripgrep fast path invokes `rg` via `subprocess.run([...])` with a list, not a string, so the query is never passed through a shell.
+
+### Wiring into `eternal-context`
+
+The skill wrapper is a few lines once you paste an existing skill file so I can mirror the registration pattern. Expected shape:
+
+```python
+# hypothetical — needs the real eternal-context skill interface
+import json, subprocess
+from pathlib import Path
+
+HELPER = Path("~/mnemosyne-setup/obsidian-search.py").expanduser()
+
+def obsidian_search(query: str, limit: int = 10) -> list[dict]:
+    r = subprocess.run(
+        [str(HELPER), "--json", "search", query, "--limit", str(limit)],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(r.stdout)
+
+def obsidian_read(path: str) -> str:
+    r = subprocess.run(
+        [str(HELPER), "read", path],
+        capture_output=True, text=True, check=True,
+    )
+    return r.stdout
+
+def obsidian_list_recent(days: int = 7, limit: int = 50) -> list[dict]:
+    r = subprocess.run(
+        [str(HELPER), "--json", "list-recent", "--days", str(days), "--limit", str(limit)],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(r.stdout)
+```
+
+Each of these becomes a registered tool in whatever way eternal-context actually does registration (decorator, YAML manifest, registry class, etc.). Paste one existing skill from `~/projects/mnemosyne/eternal-context/skills/<something>/` and the wrapper is a 5-minute follow-up commit.
+
+### Open design questions (v2, not blocking v1)
+
+1. **Embeddings vs. ripgrep.** v1 is ripgrep-only — fast, deterministic, no model dependency. If recall becomes a problem, v2 can add a sentence-transformers index (torch is already in the venv from the eternal-context requirements).
+2. **Frontmatter exposure.** v1 treats YAML frontmatter as flat text inside the file. v2 could expose tags/aliases as separate query surfaces (`obsidian_search_by_tag`, etc.).
+3. **Write tools.** Deliberately out of scope for v1 — daily-note appending and link rewriting are useful but high-blast-radius. Land them as a separate `obsidian-write` skill once the read path is proven.
+4. **WSL path translation.** If the vault lives on the Windows side (e.g. `/mnt/c/Users/<you>/Documents/Obsidian`), file-watch performance over `9p` is mediocre. Acceptable for v1 (queries are point-in-time). If it becomes a problem, mirror to a WSL-native path under `~/` or poll with a longer interval.
 
 ## Security model
 
