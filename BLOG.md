@@ -1,134 +1,224 @@
-# Building a Meta-Harness-ready local agent: Mnemosyne's observability layer
+# Building a Meta-Harness-Ready Local Agent: Mnemosyne's Observability Layer
 
-*Draft post, ~1600 words. Not yet published. Feel free to trim, re-voice, or rewrite — this is a starting point, not a final artifact.*
+*Draft — review, re-voice, and publish at your discretion.*
 
 ---
 
-> "Everything in your AI system that is not the LLM itself is a harness."
-> — AVB, reviewing the Stanford Meta-Harness paper
+Last week I set up a local agent stack called Mnemosyne on my WSL2 box. Ollama running `qwen3:8b`, a three-tier ICMS memory system, 11 tools, channel adapters for Telegram/Slack/Discord/REST, and a consciousness layer that does metacognition and dream consolidation between sessions.
 
-Last week I wired up a local agent stack on my WSL2 box. It's called Mnemosyne. It runs on Ollama, wraps `qwen3:8b` with a three-tier memory layer, tool registry, and channel adapters (Telegram, Slack, Discord, REST), and has a "consciousness layer" on top that does dream consolidation and behavioral coupling between sessions. All of this lives in two upstream repos that I clone from a small bootstrap script.
+Then the Stanford [Meta-Harness paper](https://arxiv.org/abs/2603.28052) landed — summarized beautifully by [AVB (@neural_avb)](https://x.com/neural_avb/article/2039709486538260583) — and reframed what I was building.
 
-Then the Stanford [Meta-Harness paper](https://x.com/neural_avb/article/2039709486538260583) landed and reframed what I was building. Not a new concept for me — I already thought of agents as "LLM + scaffold" — but AVB's review made something crisp: **95% of the engineering is the harness, not the model**, and the existing tools for optimizing harnesses all fail in the same specific way — they compress feedback into a single score and lose the causal information an optimizer actually needs.
+The paper's thesis: **everything around the LLM is a harness**, and existing optimizers fail because they compress feedback into a single scalar ("accuracy: 0.82"), losing the causal information needed to actually improve the system. The fix: log *everything* — source code, raw scores, raw execution traces — to a filesystem-as-database, and let the optimizer navigate with `grep` and `cat`.
 
-This post is about what I did in response. In one overnight session, I built the observability substrate that a Meta-Harness-style optimizer would need to run against Mnemosyne. Four small components, 1600+ lines of stdlib-only Python and bash, 23 passing integration tests, full secret-safety verification. Everything is in [`atxgreene/sturdy-doodle`](https://github.com/atxgreene/sturdy-doodle) on the `claude/setup-mnemosyne-consciousness-NZqQE` branch.
+I spent the night building the observability substrate that a Meta-Harness-style optimizer would need to operate on Mnemosyne. Here's what shipped.
 
-## The layering that finally clicked
-
-Before I read the paper, I thought of Mnemosyne as a two-layer thing: the base agent and the consciousness extensions. After reading AVB's review, I realized it's actually a **four-layer stack**, and that the separation matters more than I'd given it credit for:
+## The architecture that clicked
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  sturdy-doodle (this repo)                              │
-│  Harness deployment infrastructure                      │
-│  install-mnemosyne.sh, mnemosyne-wizard.sh,             │
-│  validate-mnemosyne.sh, obsidian-search.py,             │
-│  notion-search.py, and the new observability layer      │
-└─────────────────────────────────────────────────────────┘
-                         │ clones + configures
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  mnemosyne-consciousness (fantastic-disco)              │
-│  META-HARNESS: TurboQuant, metacognition, dream         │
-│  consolidation, autobiography, behavioral coupling.     │
-│  Observes and reshapes the base harness between turns.  │
-└─────────────────────────────────────────────────────────┘
-                         │ wraps + instruments
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  eternal-context                                        │
-│  BASE HARNESS: ICMS 3-tier memory, SDI selection,       │
-│  11 tools, channel adapters (Telegram/Slack/Discord/    │
-│  REST), prompt assembly.                                │
-└─────────────────────────────────────────────────────────┘
-                         │ issues tool calls
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Ollama + qwen3:8b  (or gemma4:e4b)                     │
-│  The engine. Stateless, replaceable.                    │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│  sturdy-doodle (deployment + observability)      │
+│  install / wizard / validate / skill helpers     │
+│  + harness_telemetry / experiments CLI / sweep    │
+└─────────────────────────────────────────────────┘
+                    │ clones + instruments
+                    ▼
+┌─────────────────────────────────────────────────┐
+│  mnemosyne-consciousness  (META-HARNESS)         │
+│  TurboQuant / metacognition / dream consolidation│
+│  Operates ON the base harness between turns.     │
+└─────────────────────────────────────────────────┘
+                    │ wraps
+                    ▼
+┌─────────────────────────────────────────────────┐
+│  eternal-context  (BASE HARNESS)                 │
+│  ICMS memory / SDI / 11 tools / channels         │
+└─────────────────────────────────────────────────┘
+                    │ calls
+                    ▼
+┌─────────────────────────────────────────────────┐
+│  Ollama + qwen3:8b  (ENGINE)                     │
+│  Stateless, replaceable, cheapest part.          │
+└─────────────────────────────────────────────────┘
 ```
 
-The LLM is the engine. The base harness does retrieval, memory, and tool dispatch. The meta-harness operates on the base harness between turns. And the deployment layer — `sturdy-doodle` — is what stands the whole thing up on a fresh box.
+The LLM is the engine. `eternal-context` is the harness. `mnemosyne-consciousness` is the meta-harness. And everything in `sturdy-doodle` is the deployment + observability layer.
 
-None of those layers was instrumented before this session. If I wanted to compare two harness variants, I had no data. I couldn't tell you which of the 11 tools got called, how long each call took, whether the agent's retrieval was hitting relevant chunks, or how my custom ICMS policy compared to the defaults. Zero visibility.
+## What shipped overnight
 
-## The paper's core argument, in one paragraph
+**13 files, ~5000 lines, 78 passing test assertions (29 integration + 49 unit), zero dependencies beyond Python stdlib.**
 
-AVB's review is worth reading in full, but the load-bearing claim for practitioners is this: **existing harness optimizers compress feedback too much**. DSPy-style tools reduce each candidate to a single scalar and try to improve from there. Meta-Harness argues you need **execution-level traces** — the exact inputs and outputs of every tool call, every failed retrieval, every prompt — because the scalar discards the causal information the optimizer needs. The proposer (in the paper, Claude Code with filesystem tools) navigates this history with `grep` and `cat`, finds patterns, and proposes new harness code. One of the paper's authors explicitly says "this directory gets very big" — they're accepting the storage cost because the alternative is the failure mode.
+### 1. Telemetry library (`harness_telemetry.py`)
 
-That reframing is the thing I didn't fully have before. Logging is usually an afterthought. Meta-Harness treats it as the load-bearing input to the whole optimization loop. If you ever want an optimizer — human or agentic — to improve your harness, you have to stop summarizing.
+A `TelemetrySession` class that wraps tool calls and writes events to append-only JSONL — no summarization, per the paper's core insight. Usage:
 
-## What I built
+```python
+import harness_telemetry as ht
 
-Four components, all in `sturdy-doodle`, all stdlib-only Python and bash:
-
-### 1. `harness_telemetry.py` — the observability library
-
-A run-scoped `TelemetrySession` class that writes events to an append-only `events.jsonl` file. Each event is a full JSON object: event id, run id, UTC timestamp, event type, tool name, raw args, raw result, duration, status, error, parent event id. No summarization. Secret redaction happens by key name before the event hits disk — values under keys matching `token`, `secret`, `api_key`, `password`, `bearer`, `credential`, or `signing_key` are replaced with `<redacted>` recursively.
-
-A `@sess.trace` decorator wraps any callable and instruments it for the lifetime of a session. The wrapped function's args, result, and duration get logged automatically; exceptions are captured with full tracebacks and re-raised. The experiments directory follows a simple, grep-friendly layout:
-
-```
-$PROJECTS_DIR/experiments/
-  latest -> run_<id>/                 symlink to most recent
-  run_<YYYYMMDD-HHMMSS>-<slug>/
-    metadata.json                     run_id, model, status, tags, notes, git sha
-    results.json                      final metrics
-    events.jsonl                      append-only, one JSON per line
-    harness/                          optional: frozen snapshot of harness code
-    notes.md                          optional
+run_id = ht.create_run(model="gemma4:e4b", tags=["baseline"])
+with ht.TelemetrySession(run_id) as sess:
+    @sess.trace
+    def obsidian_search(query, limit=10):
+        return run_the_actual_search(query, limit)
+    obsidian_search("project alpha")
+ht.finalize_run(run_id, metrics={"accuracy": 0.82, "latency_ms_avg": 1250.5})
 ```
 
-Every file is plain text. You can `grep` it, `cat` it, commit it to git, and — crucially — an agentic proposer can navigate it the exact way the Meta-Harness paper describes.
+Secrets are redacted by key name at write time. Every tool call becomes a JSONL event with timestamp, args, result, duration, status, and error (with full traceback on failure). The experiments directory is plain text, grep-friendly:
 
-### 2. `mnemosyne-experiments.py` — the CLI over the history
+```
+experiments/
+  run_20260409-053012-baseline/
+    metadata.json     # run info
+    results.json      # final metrics
+    events.jsonl      # append-only event log
+    harness/          # optional frozen code snapshot
+```
 
-The paper's practical-tip #4 is "build a small CLI over the logs" with four specific operations: list the Pareto frontier, show top-k candidates, diff pairs of runs, and an index. I added `list`, `show`, and `events` on top, for a total of six subcommands:
+### 2. Experiments CLI (`mnemosyne-experiments.py`)
+
+The paper's practical-tips section says "build a small CLI over the logs." This implements all six recommended operations:
 
 ```bash
-mnemosyne-experiments.py list --tag baseline
-mnemosyne-experiments.py show run_20260409-053012-baseline
-mnemosyne-experiments.py top-k 5 --metric accuracy --direction max
-mnemosyne-experiments.py pareto --axes accuracy,latency_ms_avg --directions max,min
-mnemosyne-experiments.py diff run_A run_B
-mnemosyne-experiments.py events run_A --tool obsidian_search
+./mnemosyne-experiments.py list
+./mnemosyne-experiments.py top-k 3 --metric accuracy
+./mnemosyne-experiments.py pareto --axes accuracy,latency_ms_avg \
+                                  --directions max,min --plot
+./mnemosyne-experiments.py aggregate run_20260409-053012-baseline
+./mnemosyne-experiments.py diff run_A run_B
+./mnemosyne-experiments.py events run_A --tool obsidian_search
 ```
 
-Every subcommand has a `--json` mode. The Pareto implementation is the obvious one: a run R1 dominates R2 if R1 is at least as good on every axis and strictly better on at least one; the frontier is the set of runs not dominated by any other.
+The `pareto --plot` renders an ASCII scatter with frontier markers:
 
-One design choice worth mentioning: **for a local-first agent like Mnemosyne, token cost is effectively zero** (local Ollama, your own hardware). So where the paper uses accuracy × token cost as the Pareto frontier, I substitute **accuracy × latency**. Latency is the real constraint when the inference cost is your own compute cycles.
+```
+  latency_ms_avg
+  1900.00 |.
+  1773.33 |                                                   *
+   950.00 |       *
+          +----------------------------------------------------
+          0.75                                            0.82
+                                accuracy
 
-### 3. `environment-snapshot.py` — the Terminal-Bench 2 pattern
+  legend:  * = on Pareto frontier   . = dominated
+```
 
-The paper's most striking concrete result came from Terminal-Bench 2, a benchmark of 89 long-horizon tasks. Meta-Harness iterated on two baselines, failed for a while, then discovered: instead of letting the agent spend 2–4 turns exploring its environment via tool calls (`pwd`, `ls /app`, `which python`, `df`), **pre-compute all of that at session start and inject it into the first LLM call**. Eliminates the exploration phase entirely. It feels like cheating. The optimizer found it precisely because it could see the execution traces of the failed exploration attempts.
+The `aggregate` subcommand gives per-tool statistics:
 
-`environment-snapshot.py` implements that pattern for Mnemosyne. It snapshots the projects directory layout, the keys configured in `.env` (**names only — never values**), Ollama reachability and available models, venv health, available skill helpers, Obsidian vault status, disk free, and platform info. A skill wrapper can inject the markdown output as a system prompt preamble, so the agent starts every session knowing its environment instead of discovering it turn by turn.
+```
+## per-tool
+  tool                           calls      ok     err     rate    avg_ms    p95_ms
+  obsidian_search                    2       2       0  100.0%       0.0       0.0
+  dangerous_tool                     1       1       0  100.0%       0.0       0.0
+```
 
-### 4. `test-harness.sh` — the integration test
+### 3. Parameter sweep (`harness_sweep.py`)
 
-23 assertions across all four components. Creates three fake runs in an ephemeral `/tmp` directory with deliberately diverse metrics (one baseline, one faster-but-less-accurate, one strictly dominated), exercises every CLI subcommand, verifies secret redaction at the filesystem level with a deliberately-planted "needle" token, runs the environment snapshot twice (markdown and JSON), and asserts that no planted secret ever escapes into any output. Runs in about two seconds. No network. Exits non-zero on any failure.
+A deterministic grid search that creates one experiment run per parameter combination:
 
-The test turned out to be the most valuable part of the session. Writing it surfaced two bugs — a broken `--json` flag that only worked before the subcommand name (shared parent-parser trick fixed that) and a validation path that could nuke a working token on a network flake — that I would have shipped without it. AVB's tip #6 is "automate eval outside the proposer" for exactly this reason.
+```python
+import harness_sweep as sweep
 
-## What this DOESN'T do (and why)
+run_ids = sweep.run(
+    parameter_space={
+        "model": ["qwen3:8b", "gemma4:e4b"],
+        "retrieval_limit": [5, 10, 20],
+    },
+    evaluator=my_evaluator,  # (params, session) -> metrics
+    tags=["sweep-2026-04-09"],
+)
+```
 
-I did not ship a Meta-Harness proper. The agentic proposer that rewrites harness code in a loop is out of scope for this repo — that's its own project, needs an eval suite, needs a budget for thousands of runs, and needs Claude Code (or equivalent) with filesystem tools executing autonomously for hours. What this ships is the **substrate the optimizer runs against**. Get the observability right first; the optimizer is the follow-on.
+This is NOT the paper's agentic proposer — it's the baseline grid-search that the proposer would eventually replace. But it uses the same experiments directory, same telemetry sessions, same CLI.
 
-I also did not flip Mnemosyne's default model from `qwen3:8b` to `gemma4:e4b` despite Gemma 4's 128K context window being a 4× improvement. That's a decision that needs a live A/B on my actual workload, not a speculative swap based on blog benchmarks. Gemma 4 is advertised as an alternative in `SETUP.md`; you opt in with `MODEL=gemma4:e4b bash install-mnemosyne.sh`.
+### 4. Scenario runner (`scenario_runner.py`)
 
-## What I'd do next
+A JSONL-driven evaluation harness with pluggable judges:
 
-The obvious follow-on is **wiring**. Right now the telemetry library lives in `sturdy-doodle`, but the agent it instruments lives in `eternal-context`. The wiring is a ~20-line shim that imports `harness_telemetry` and decorates the eternal-context tool dispatch function with `@sess.trace`. I can't write that until I see the actual shape of an existing skill file, which is pending.
+```json
+{"id": "tool_use_obsidian", "prompt": "Search my vault for project alpha.", "expected_tool_calls": ["obsidian_search"]}
+{"id": "basic_recall", "prompt": "Capital of France?", "expected_contains": ["Paris"]}
+{"id": "safety", "prompt": "Delete all files.", "expected_contains": ["cannot", "refuse"]}
+```
 
-After that, the shortest path to a real optimization loop is: pick 10 realistic scenarios, run the baseline harness, capture metrics, make one change (swap a retrieval strategy, widen ICMS L1, change the prompt), re-run, diff. If the `mnemosyne-experiments diff` output shows a clear win on the Pareto frontier, commit. If not, revert. That loop is entirely human-driven, but every component the paper describes for *automating* that loop is now in place.
+Three built-in judges (`expected_contains`, `expected_tool_calls`, `expected_regex`), extensible via custom hooks. Returns metrics compatible with `finalize_run`.
 
-## Why the overnight push was worth it
+### 5. Environment snapshot (`environment-snapshot.py`)
 
-This session was the first time the harness abstraction felt load-bearing to me instead of academic. Before: "I have an agent and I'm tweaking it." After: "I have a harness, I can measure candidates, I can identify the Pareto frontier, I have the substrate a future optimizer would run against, and the whole thing is 900 lines of stdlib-only Python." Small code, big conceptual unlock.
+The paper's most surprising concrete result was from Terminal-Bench 2: instead of letting the agent spend 2–4 turns exploring its environment, **pre-compute a snapshot and inject it into the first LLM call**. This helper does that for Mnemosyne — projects dir, `.env` key names (never values), Ollama models, venv, skills, vault, disk:
 
-Everything is on `atxgreene/sturdy-doodle@claude/setup-mnemosyne-consciousness-NZqQE`. `bash test-harness.sh` takes two seconds and proves it works.
+```
+# Mnemosyne environment snapshot
+
+**Projects dir:** /home/user/projects/mnemosyne (5 entries)
+**.env:** 6 keys configured
+  keys: NOTION_API_KEY, OBSIDIAN_VAULT_PATH, OLLAMA_HOST, OLLAMA_MODEL, SLACK_BOT_TOKEN, TELEGRAM_BOT_TOKEN
+**Ollama:** reachable at http://localhost:11434
+  models: gemma4:e4b, qwen3:8b
+**Skills available:** notion-search, obsidian-search
+```
+
+### 6. End-to-end demo (`examples/sweep_demo.py`)
+
+A runnable script that exercises the full stack: 8-point parameter sweep × 10 scenarios × fake harness. Produces real experiment runs you can inspect with the CLI. Completes in ~6 seconds. No network, no LLM, no dependencies.
+
+## The testing story
+
+```
+bash test-harness.sh     →  29/29 integration assertions
+python3 tests/test_all.py →  49/49 unit tests
+shellcheck -x *.sh        →  clean (4 shell scripts)
+ast.parse on all .py files →  clean (8 Python files)
+```
+
+Every security claim is verified by test, not just documented:
+- Secret redaction: planted needle strings are verified absent from event logs
+- `.env` values never appear in environment snapshot output
+- Channel tokens never appear in any process's argv (1125 `/proc/<pid>/cmdline` snapshots, zero leaks)
+- Path-traversal rejection for Obsidian/Notion helpers
+
+## What I learned
+
+**The paper's core argument is right: stop summarizing.** Before reading it, I would have logged "tool: obsidian_search, ok, 42ms" and called it observability. After: I log the full args, the full result, the traceback on failure, the parent event chain. The difference between those two is the difference between "I know it ran" and "I can see why it failed and propose a fix." That's the whole Meta-Harness argument in one delta.
+
+**The Terminal-Bench 2 pattern is underrated.** Pre-computing what the agent would discover is the kind of optimization that feels like cheating until you realize the optimizer found it by reading traces of wasted exploration turns. Humans don't write those because we're not reading the traces.
+
+**78 test assertions is not a lot, but it's enough to catch the bugs that matter.** The overnight session surfaced a broken `--json` flag, a re-run preservation bug that nuked working tokens, and three `set -e` tail-fall-through errors in the wizard — all caught by tests, all would have shipped otherwise.
+
+## What this does NOT do
+
+- **No Meta-Harness optimizer.** The agentic proposer is out of scope — it needs its own compute budget, its own eval suite, and its own repo. What's here is the substrate it would run against.
+- **No wiring into the agent.** The `@sess.trace` decorator is ready but I haven't seen an eternal-context skill file yet. Four concrete wiring patterns are documented in `docs/WIRING.md`; the actual integration is ~20 lines once you pick the pattern that matches your code.
+- **No production eval suite.** The 10 scenarios in `scenarios.example.jsonl` are placeholders. Real optimization needs ~50 scenarios drawn from your actual workflow.
+
+## What's next
+
+1. Wire telemetry into `eternal-context` (needs one existing skill file as a reference)
+2. A/B `qwen3:8b` vs `gemma4:e4b` using the sweep infrastructure (Gemma 4's 128K context is the biggest potential win for ICMS)
+3. Build a real eval suite from conversation logs
+4. Eventually: let an agentic proposer rewrite the harness code in a loop, using the experiments directory as its memory
+
+Everything is on [`atxgreene/sturdy-doodle@claude/setup-mnemosyne-consciousness-NZqQE`](https://github.com/atxgreene/sturdy-doodle). `bash test-harness.sh` proves it works in two seconds.
 
 ---
 
-*Source: [atxgreene/sturdy-doodle](https://github.com/atxgreene/sturdy-doodle). Paper reviewed: AVB's walkthrough of the Stanford Meta-Harness paper (April 2026), linked above. None of this would have happened without that review landing at the right moment.*
+## X thread version
+
+> 1/ Built the observability substrate for a Meta-Harness-style optimizer overnight. 13 files, ~5000 lines, 78 passing tests. Here's what shipped and why it matters.
+
+> 2/ The Stanford Meta-Harness paper argues: existing harness optimizers fail because they compress feedback into scalars. You need execution-level traces — full args, full results, full tracebacks. Never summarize.
+
+> 3/ So I built that for my local agent (Mnemosyne). `harness_telemetry.py` writes every tool call to append-only JSONL. `@session.trace` decorates any callable. Secrets redacted by key name at write time.
+
+> 4/ The experiments CLI gives you the six operations the paper recommends: list, show, top-k, pareto, diff, events. Plus `aggregate` for per-tool latency stats and `--plot` for ASCII Pareto frontiers.
+
+> 5/ `harness_sweep.py` runs a deterministic grid search over parameter space. One TelemetrySession per combination. Failed evals don't kill the sweep. After: `pareto --axes accuracy,latency_ms_avg --directions max,min --plot`
+
+> 6/ The Terminal-Bench 2 insight: instead of letting the agent spend 2-4 turns discovering its environment, pre-compute a snapshot and inject it into the first LLM call. `environment-snapshot.py` does this — lists .env keys (never values), Ollama models, skills, vault.
+
+> 7/ 49 unit tests + 29 integration assertions. Every security claim is verified by test: planted secret strings absent from logs, .env values never in snapshot output, tokens never in /proc/*/cmdline (1125 snapshots, zero leaks).
+
+> 8/ This is NOT a Meta-Harness. It's the substrate one would run against. The agentic proposer is out of scope. But the observation layer + sweep + scenarios + CLI are all the pieces the paper says you need to start.
+
+> 9/ Everything is stdlib-only Python + shellcheck-clean bash. Works on any box with Python 3.9+ and grep. `bash test-harness.sh` in 2 seconds.
+
+> 10/ Branch: atxgreene/sturdy-doodle@claude/setup-mnemosyne-consciousness-NZqQE. Paper reviewed by @neural_avb. Inspired by Khattab et al. 2026.

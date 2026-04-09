@@ -3,15 +3,17 @@
 #  mnemosyne-experiments.py
 #
 #  Small CLI over the experiments/ tree written by harness_telemetry.py.
-#  Implements the six operations the Meta-Harness paper recommends for
-#  humans (and future agentic proposers) to navigate a run history:
+#  Implements the operations the Meta-Harness paper recommends for humans
+#  (and future agentic proposers) to navigate a run history:
 #
-#    list      — all runs, most recent first
-#    show      — metadata + results + event count for one run
-#    top-k     — top K runs by any numeric metric
-#    pareto    — Pareto frontier on N metrics at once
-#    diff      — side-by-side of two runs (metadata, metrics, harness code)
-#    events    — event stream for a run, filterable by type/tool
+#    list       — all runs, most recent first
+#    show       — metadata + results + event count for one run
+#    top-k      — top K runs by any numeric metric
+#    pareto     — Pareto frontier on N metrics at once (with optional ASCII plot)
+#    diff       — side-by-side of two runs (metadata, metrics, harness code)
+#    events     — event stream for a run, filterable by type/tool
+#    aggregate  — per-tool statistics over a run's events.jsonl
+#                 (call count, success rate, latency p50/p95/p99)
 #
 #  Stdlib only. Consumes harness_telemetry as a library. Can be run as
 #  ./mnemosyne-experiments.py ... or via `python3 mnemosyne-experiments.py`.
@@ -24,10 +26,11 @@
 #    ./mnemosyne-experiments.py show run_20260409-053012-abc123
 #    ./mnemosyne-experiments.py top-k 5 --metric accuracy
 #    ./mnemosyne-experiments.py top-k 5 --metric latency_ms_avg --direction min
-#    ./mnemosyne-experiments.py pareto --axes accuracy,latency_ms_avg \
-#                                      --directions max,min
+#    ./mnemosyne-experiments.py pareto --axes accuracy,latency_ms_avg --directions max,min
+#    ./mnemosyne-experiments.py pareto --axes accuracy,latency_ms_avg --directions max,min --plot
 #    ./mnemosyne-experiments.py diff run_A run_B
 #    ./mnemosyne-experiments.py events run_A --event-type tool_call --tool obsidian_search
+#    ./mnemosyne-experiments.py aggregate run_A
 # ==============================================================================
 
 from __future__ import annotations
@@ -261,6 +264,21 @@ def cmd_pareto(args: argparse.Namespace) -> int:
     for rid, meta, vals in frontier:
         axis_str = "  ".join(f"{a}={v}" for a, v in zip(axes, vals))
         print(f"  {rid}  {axis_str}  model={meta.get('model','?')}")
+
+    # Optional ASCII plot. Only supported for exactly two axes —
+    # anything else requires a projection strategy that's out of scope.
+    if getattr(args, "plot", False):
+        if len(axes) != 2:
+            print()
+            print("(--plot requires exactly 2 axes; skipping)", file=sys.stderr)
+            return 0
+        frontier_ids = {rid for rid, _, _ in frontier}
+        points = [
+            (rid, float(vals[0]), float(vals[1]))
+            for rid, _, vals in runs_with_values
+        ]
+        print()
+        print(_ascii_scatter(points, frontier_ids, x_label=axes[0], y_label=axes[1]))
     return 0
 
 
@@ -405,6 +423,230 @@ def cmd_events(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- aggregate (per-tool statistics from events.jsonl) ----------------------
+
+def _percentile(sorted_values: list[float], p: float) -> float:
+    """Inclusive nearest-rank percentile on a pre-sorted list."""
+    if not sorted_values:
+        return 0.0
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    rank = max(0, min(len(sorted_values) - 1,
+                      int(round((p / 100.0) * (len(sorted_values) - 1)))))
+    return sorted_values[rank]
+
+
+def cmd_aggregate(args: argparse.Namespace) -> int:
+    """Compute per-tool statistics from a run's events.jsonl.
+
+    Reports, per tool:
+      call_count, ok_count, error_count, success_rate,
+      duration_ms (min/p50/p95/p99/max/avg), total_duration_ms
+    And an overall summary across all tools.
+    """
+    rd = ht.run_path(args.run_id, Path(args.projects_dir) if args.projects_dir else None)
+    events_file = rd / "events.jsonl"
+    if not events_file.exists():
+        print(f"aggregate: no events.jsonl for {args.run_id}", file=sys.stderr)
+        return 3
+
+    by_tool: dict[str, list[dict[str, Any]]] = {}
+    event_type_counts: dict[str, int] = {}
+    total_events = 0
+
+    with events_file.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            total_events += 1
+            et = e.get("event_type", "unknown")
+            event_type_counts[et] = event_type_counts.get(et, 0) + 1
+            if et != "tool_call":
+                continue
+            tool = e.get("tool") or "(unnamed)"
+            by_tool.setdefault(tool, []).append(e)
+
+    if not by_tool:
+        if args.json:
+            _emit_json({
+                "run_id": args.run_id,
+                "total_events": total_events,
+                "event_type_counts": event_type_counts,
+                "tools": {},
+            })
+        else:
+            print(f"aggregate: run {args.run_id} has {total_events} events, 0 tool_calls")
+            for et, n in sorted(event_type_counts.items()):
+                print(f"  {et}: {n}")
+        return 0
+
+    # Build per-tool stats
+    stats: dict[str, dict[str, Any]] = {}
+    for tool, tool_events in sorted(by_tool.items()):
+        durations = sorted(
+            e["duration_ms"]
+            for e in tool_events
+            if isinstance(e.get("duration_ms"), (int, float))
+        )
+        ok = sum(1 for e in tool_events if e.get("status") == "ok")
+        errors = sum(1 for e in tool_events if e.get("status") == "error")
+        total = len(tool_events)
+        err_types: dict[str, int] = {}
+        for e in tool_events:
+            err = e.get("error")
+            if isinstance(err, dict):
+                t = err.get("type", "Unknown")
+                err_types[t] = err_types.get(t, 0) + 1
+
+        stats[tool] = {
+            "call_count": total,
+            "ok_count": ok,
+            "error_count": errors,
+            "success_rate": (ok / total) if total else 0.0,
+            "duration_ms": {
+                "min": min(durations) if durations else 0.0,
+                "p50": _percentile(durations, 50),
+                "p95": _percentile(durations, 95),
+                "p99": _percentile(durations, 99),
+                "max": max(durations) if durations else 0.0,
+                "avg": (sum(durations) / len(durations)) if durations else 0.0,
+                "total": sum(durations) if durations else 0.0,
+            },
+            "error_types": err_types,
+        }
+
+    # Overall
+    all_tool_calls = sum(v["call_count"] for v in stats.values())
+    all_ok = sum(v["ok_count"] for v in stats.values())
+    all_errors = sum(v["error_count"] for v in stats.values())
+    all_durations = sorted(
+        d
+        for tool_events in by_tool.values()
+        for e in tool_events
+        if isinstance(e.get("duration_ms"), (int, float))
+        for d in [e["duration_ms"]]
+    )
+
+    overall = {
+        "tool_calls_total": all_tool_calls,
+        "tool_calls_ok": all_ok,
+        "tool_calls_error": all_errors,
+        "success_rate": (all_ok / all_tool_calls) if all_tool_calls else 0.0,
+        "duration_ms": {
+            "p50": _percentile(all_durations, 50),
+            "p95": _percentile(all_durations, 95),
+            "p99": _percentile(all_durations, 99),
+            "avg": (sum(all_durations) / len(all_durations)) if all_durations else 0.0,
+            "total": sum(all_durations),
+        },
+    }
+
+    out = {
+        "run_id": args.run_id,
+        "total_events": total_events,
+        "event_type_counts": event_type_counts,
+        "overall": overall,
+        "tools": stats,
+    }
+
+    if args.json:
+        _emit_json(out)
+        return 0
+
+    print(f"# aggregate for {args.run_id}")
+    print()
+    print(f"total events: {total_events}")
+    for et in sorted(event_type_counts):
+        print(f"  {et:<14} {event_type_counts[et]}")
+    print()
+    print(f"## overall tool_call stats")
+    print(f"  calls:        {all_tool_calls}")
+    print(f"  ok:           {all_ok}")
+    print(f"  errors:       {all_errors}")
+    print(f"  success_rate: {overall['success_rate']:.2%}")
+    if all_durations:
+        d = overall["duration_ms"]
+        print(f"  duration_ms:  avg={d['avg']:.1f}  p50={d['p50']:.1f}  "
+              f"p95={d['p95']:.1f}  p99={d['p99']:.1f}  total={d['total']:.1f}")
+    print()
+    print(f"## per-tool")
+    print(f"  {'tool':<28}  {'calls':>6}  {'ok':>6}  {'err':>6}  "
+          f"{'rate':>7}  {'avg_ms':>8}  {'p95_ms':>8}")
+    for tool, v in stats.items():
+        d = v["duration_ms"]
+        print(f"  {tool:<28}  {v['call_count']:>6}  {v['ok_count']:>6}  "
+              f"{v['error_count']:>6}  {v['success_rate']:>6.1%}  "
+              f"{d['avg']:>8.1f}  {d['p95']:>8.1f}")
+        if v["error_types"]:
+            for t, n in sorted(v["error_types"].items(), key=lambda x: -x[1]):
+                print(f"      error[{t}]={n}")
+    return 0
+
+
+# ---- ASCII scatter plot for pareto ------------------------------------------
+
+def _ascii_scatter(
+    points: list[tuple[str, float, float]],
+    frontier_ids: set[str],
+    x_label: str,
+    y_label: str,
+    width: int = 64,
+    height: int = 16,
+) -> str:
+    """Render a small ASCII scatter plot.
+
+    Frontier points use '*', dominated points use '.', overlaps use '#'.
+    """
+    if not points:
+        return "(no points to plot)"
+
+    xs = [p[1] for p in points]
+    ys = [p[2] for p in points]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    x_span = (x_max - x_min) or 1.0
+    y_span = (y_max - y_min) or 1.0
+
+    # Reserve columns for y-axis label + border
+    plot_w = max(20, width - 12)
+    plot_h = max(8, height)
+
+    grid = [[" "] * plot_w for _ in range(plot_h)]
+    # Map each point to a cell; merge into '#' on collision.
+    for rid, x, y in points:
+        col = int(round((x - x_min) / x_span * (plot_w - 1)))
+        row = int(round((y_max - y) / y_span * (plot_h - 1)))
+        col = max(0, min(plot_w - 1, col))
+        row = max(0, min(plot_h - 1, row))
+        ch = "*" if rid in frontier_ids else "."
+        existing = grid[row][col]
+        if existing == " ":
+            grid[row][col] = ch
+        elif existing != ch:
+            grid[row][col] = "#"
+
+    # Render
+    lines: list[str] = []
+    lines.append(f"  {y_label}")
+    for i, row_cells in enumerate(grid):
+        y_val = y_max - (i / (plot_h - 1)) * y_span if plot_h > 1 else y_max
+        label = f"{y_val:9.2f} |"
+        lines.append(label + "".join(row_cells))
+    lines.append(" " * 10 + "+" + "-" * plot_w)
+    # X-axis ticks: just min and max under the first and last columns
+    x_axis_line = " " * 10 + f"{x_min:<{plot_w - len(f'{x_max:.2f}')}.2f}{x_max:.2f}"
+    lines.append(x_axis_line)
+    lines.append(" " * (10 + plot_w // 2 - len(x_label) // 2) + x_label)
+    lines.append("")
+    lines.append("  legend:  * = on Pareto frontier   . = dominated   # = overlap")
+    return "\n".join(lines)
+
+
 # ---- arg parsing + dispatch --------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -444,6 +686,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="comma-separated metric names (e.g. 'accuracy,latency_ms_avg')")
     pp.add_argument("--directions", required=True,
                     help="comma-separated direction per axis ('max' or 'min')")
+    pp.add_argument("--plot", action="store_true",
+                    help="render an ASCII scatter plot of all runs with the frontier highlighted "
+                         "(requires exactly 2 axes)")
 
     dp = sub.add_parser("diff", parents=[common], help="diff two runs")
     dp.add_argument("run_a")
@@ -455,6 +700,11 @@ def build_parser() -> argparse.ArgumentParser:
     ep.add_argument("--tool", help="filter by tool name")
     ep.add_argument("--status", help="filter by status")
     ep.add_argument("--limit", type=int, default=None)
+
+    ap = sub.add_parser("aggregate", parents=[common],
+                        help="per-tool statistics from a run's events.jsonl "
+                             "(call count, success rate, latency p50/p95/p99)")
+    ap.add_argument("run_id")
 
     return p
 
@@ -469,6 +719,7 @@ def main(argv: list[str] | None = None) -> int:
         "pareto": cmd_pareto,
         "diff": cmd_diff,
         "events": cmd_events,
+        "aggregate": cmd_aggregate,
     }
     return handlers[args.cmd](args)
 

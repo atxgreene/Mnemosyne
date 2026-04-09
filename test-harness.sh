@@ -310,6 +310,45 @@ else
   bad "events: baseline run has too few events ($EVENT_COUNT)"
 fi
 
+# aggregate: per-tool stats
+AGG_OUT=$(python3 "$MEX" aggregate "$BASELINE_RUN" 2>&1)
+if echo "$AGG_OUT" | grep -q "obsidian_search"; then
+  ok "aggregate: lists obsidian_search in per-tool table"
+else
+  bad "aggregate: obsidian_search missing from per-tool table"
+fi
+if echo "$AGG_OUT" | grep -q "100.00%"; then
+  ok "aggregate: computes success_rate"
+else
+  bad "aggregate: success_rate not shown"
+fi
+
+# aggregate --json
+if python3 "$MEX" aggregate "$BASELINE_RUN" --json 2>/dev/null | python3 -m json.tool >/dev/null; then
+  ok "aggregate --json: valid JSON"
+else
+  bad "aggregate --json: invalid JSON"
+fi
+
+# pareto --plot (requires exactly 2 axes)
+PLOT_OUT=$(python3 "$MEX" pareto --axes accuracy,latency_ms_avg --directions max,min --plot 2>&1)
+if echo "$PLOT_OUT" | grep -q "Pareto frontier"; then
+  ok "pareto --plot: frontier header present"
+else
+  bad "pareto --plot: frontier header missing"
+fi
+if echo "$PLOT_OUT" | grep -q "legend:"; then
+  ok "pareto --plot: ASCII plot rendered"
+else
+  bad "pareto --plot: plot legend missing"
+fi
+# Must contain at least one * (on-frontier marker) and one . (dominated marker)
+if echo "$PLOT_OUT" | grep -q '\*' && echo "$PLOT_OUT" | grep -qE '\.$|\.\s|^\.'; then
+  ok "pareto --plot: both frontier (*) and dominated (.) markers present"
+else
+  bad "pareto --plot: missing frontier or dominated markers"
+fi
+
 # ---- 4. environment-snapshot -------------------------------------------------
 log "4/4  environment-snapshot: markdown + JSON + secret safety"
 
