@@ -652,6 +652,256 @@ def _ascii_scatter(
     return "\n".join(lines)
 
 
+# ---- browse: interactive TUI ------------------------------------------------
+
+def cmd_browse(args: argparse.Namespace) -> int:
+    """Interactive run browser using whiptail (with text fallback).
+
+    Main menu lets you:
+      - pick a run → view its details
+      - enter compare mode → pick two runs to diff
+      - view aggregate stats for a run
+      - view the Pareto frontier (with ASCII plot)
+      - quit
+
+    Every action is a new whiptail screen; the menu returns afterwards so
+    you can keep exploring. Ctrl-C or "quit" exits.
+    """
+    import shutil as _shutil
+    import subprocess as _subprocess
+
+    has_whiptail = _shutil.which("whiptail") is not None
+    if not has_whiptail:
+        print("browse: whiptail not installed — falling back to text mode")
+        return _browse_text(args)
+
+    runs = list(ht.list_runs(projects_dir=args.projects_dir))
+    if not runs:
+        _subprocess.run(["whiptail", "--title", "Mnemosyne experiments",
+                         "--msgbox", "No runs found in the experiments directory.", "10", "50"])
+        return 0
+
+    while True:
+        main_menu = [
+            ("view",    "View a single run's details"),
+            ("aggregate", "Per-tool statistics for a run"),
+            ("diff",    "Diff two runs side by side"),
+            ("pareto",  "Pareto frontier on accuracy x latency"),
+            ("top-k",   "Top-k runs by a metric"),
+            ("events",  "Browse event stream for a run"),
+            ("quit",    "Exit"),
+        ]
+        menu_args: list[str] = []
+        for key, label in main_menu:
+            menu_args += [key, label]
+        choice = _whiptail_menu(
+            "Mnemosyne experiments",
+            f"{len(runs)} runs available. What do you want to do?",
+            menu_args,
+        )
+        if not choice or choice == "quit":
+            return 0
+
+        if choice == "view":
+            run_id = _pick_run(runs, "Pick a run to inspect:")
+            if run_id:
+                _show_run_in_tui(run_id, args.projects_dir)
+        elif choice == "aggregate":
+            run_id = _pick_run(runs, "Pick a run to aggregate:")
+            if run_id:
+                _aggregate_in_tui(run_id, args.projects_dir)
+        elif choice == "diff":
+            run_a = _pick_run(runs, "Pick the FIRST run (a):")
+            if not run_a:
+                continue
+            run_b = _pick_run(runs, "Pick the SECOND run (b):")
+            if not run_b:
+                continue
+            _diff_in_tui(run_a, run_b, args.projects_dir)
+        elif choice == "pareto":
+            _pareto_in_tui(args.projects_dir)
+        elif choice == "top-k":
+            _topk_in_tui(runs, args.projects_dir)
+        elif choice == "events":
+            run_id = _pick_run(runs, "Pick a run for event stream:")
+            if run_id:
+                _events_in_tui(run_id, args.projects_dir)
+
+
+def _whiptail_menu(title: str, prompt: str, items: list[str]) -> str | None:
+    """items is a flat list [key, label, key, label, ...]."""
+    import subprocess as _subprocess
+    count = len(items) // 2
+    cmd = ["whiptail", "--title", title, "--menu", prompt, "18", "70", str(count)] + items
+    r = _subprocess.run(cmd, capture_output=True, text=True)
+    return r.stderr.strip() if r.returncode == 0 else None
+
+
+def _pick_run(runs: list, prompt: str) -> str | None:
+    items: list[str] = []
+    for rid, meta in runs[:30]:
+        short_id = rid[:48]
+        label = f"{meta.get('status','?'):>9}  {meta.get('model','?'):<18}  {_fmt_short_ts(meta.get('started_utc'))}"
+        items.extend([short_id, label])
+    return _whiptail_menu("Runs", prompt, items)
+
+
+def _show_run_in_tui(run_id: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    try:
+        info = ht.get_run(run_id, projects_dir=projects_dir)
+    except FileNotFoundError:
+        return
+    body = [f"# {run_id}", ""]
+    body.append(f"path: {info['path']}")
+    body.append(f"events: {info['event_count']}")
+    body.append("")
+    body.append("## metadata")
+    for k in sorted(info["metadata"]):
+        body.append(f"  {k}: {info['metadata'][k]}")
+    if info["results"]:
+        body.append("")
+        body.append("## metrics")
+        for k, v in (info["results"].get("metrics") or {}).items():
+            body.append(f"  {k}: {v}")
+    _subprocess.run(["whiptail", "--title", f"Run {run_id[:40]}",
+                     "--scrolltext", "--msgbox", "\n".join(body), "30", "90"])
+
+
+def _aggregate_in_tui(run_id: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io
+    import contextlib
+    ns = argparse.Namespace(run_id=run_id, projects_dir=projects_dir, json=False)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_aggregate(ns)
+    text = buf.getvalue() or "(no events)"
+    _subprocess.run(["whiptail", "--title", f"Aggregate {run_id[:40]}",
+                     "--scrolltext", "--msgbox", text, "30", "100"])
+
+
+def _diff_in_tui(run_a: str, run_b: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io
+    import contextlib
+    ns = argparse.Namespace(run_a=run_a, run_b=run_b,
+                             projects_dir=projects_dir, json=False)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_diff(ns)
+    text = buf.getvalue() or "(diff empty)"
+    _subprocess.run(["whiptail", "--title", "Diff",
+                     "--scrolltext", "--msgbox", text, "35", "100"])
+
+
+def _pareto_in_tui(projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io
+    import contextlib
+    ns = argparse.Namespace(
+        axes="accuracy,latency_ms_avg",
+        directions="max,min",
+        plot=True,
+        projects_dir=projects_dir,
+        json=False,
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_pareto(ns)
+    _subprocess.run(["whiptail", "--title", "Pareto frontier",
+                     "--scrolltext", "--msgbox", buf.getvalue() or "(no runs)", "35", "100"])
+
+
+def _topk_in_tui(runs: list, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    metric = _subprocess.run(
+        ["whiptail", "--title", "top-k metric", "--inputbox",
+         "Metric name (e.g. accuracy, latency_ms_avg):",
+         "10", "60", "accuracy"],
+        capture_output=True, text=True,
+    )
+    if metric.returncode != 0 or not metric.stderr.strip():
+        return
+    direction = _whiptail_menu("top-k direction", "Max or min?",
+                                ["max", "Higher is better", "min", "Lower is better"])
+    if not direction:
+        return
+    import io, contextlib
+    ns = argparse.Namespace(
+        k=10, metric=metric.stderr.strip(), direction=direction,
+        projects_dir=projects_dir, json=False,
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_top_k(ns)
+    _subprocess.run(["whiptail", "--title", "Top-k", "--scrolltext",
+                     "--msgbox", buf.getvalue() or "(no runs)", "25", "90"])
+
+
+def _events_in_tui(run_id: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io, contextlib
+    ns = argparse.Namespace(
+        run_id=run_id, projects_dir=projects_dir,
+        event_type=None, tool=None, status=None,
+        limit=100, json=False,
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_events(ns)
+    _subprocess.run(["whiptail", "--title", f"Events {run_id[:40]}",
+                     "--scrolltext", "--msgbox",
+                     buf.getvalue() or "(no events)", "35", "100"])
+
+
+def _browse_text(args: argparse.Namespace) -> int:
+    """Plain-text fallback for environments without whiptail."""
+    runs = list(ht.list_runs(projects_dir=args.projects_dir))
+    if not runs:
+        print("No runs found.")
+        return 0
+    while True:
+        print()
+        print("=" * 60)
+        print("Mnemosyne experiments — text browse mode")
+        print("=" * 60)
+        for i, (rid, meta) in enumerate(runs[:20], 1):
+            print(f"  {i}) {rid}  [{meta.get('status','?')}]  {meta.get('model','?')}")
+        print()
+        print("Commands: <number> view, d <a> <b> diff, p pareto, q quit")
+        try:
+            cmd = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if not cmd or cmd == "q":
+            return 0
+        if cmd == "p":
+            ns = argparse.Namespace(axes="accuracy,latency_ms_avg",
+                                     directions="max,min", plot=True,
+                                     projects_dir=args.projects_dir, json=False)
+            cmd_pareto(ns)
+            continue
+        parts = cmd.split()
+        if parts[0] == "d" and len(parts) == 3:
+            try:
+                a = int(parts[1]) - 1
+                b = int(parts[2]) - 1
+                ns = argparse.Namespace(run_a=runs[a][0], run_b=runs[b][0],
+                                         projects_dir=args.projects_dir, json=False)
+                cmd_diff(ns)
+            except (ValueError, IndexError):
+                print("usage: d <a_index> <b_index>")
+            continue
+        try:
+            idx = int(cmd) - 1
+            rid = runs[idx][0]
+            ns = argparse.Namespace(run_id=rid, projects_dir=args.projects_dir, json=False)
+            cmd_show(ns)
+        except (ValueError, IndexError):
+            print("invalid command")
+
+
 # ---- arg parsing + dispatch --------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -711,6 +961,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "(call count, success rate, latency p50/p95/p99)")
     ap.add_argument("run_id")
 
+    # Interactive browser — uses whiptail TUI when available.
+    sub.add_parser("browse", parents=[common],
+                   help="interactive run browser (whiptail TUI, text fallback)")
+
     return p
 
 
@@ -725,6 +979,7 @@ def main(argv: list[str] | None = None) -> int:
         "diff": cmd_diff,
         "events": cmd_events,
         "aggregate": cmd_aggregate,
+        "browse": cmd_browse,
     }
     return handlers[args.cmd](args)
 

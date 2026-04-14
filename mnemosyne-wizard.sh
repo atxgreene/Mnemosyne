@@ -321,26 +321,48 @@ PY
 }
 
 # ---- header -------------------------------------------------------------------
+# Detect existing configuration so we can show users exactly what will change.
+_count_existing_keys() {
+  if [ -f "$ENV_FILE" ]; then
+    grep -cE '^[A-Z_]+=' "$ENV_FILE" 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
+}
+_existing_count=$(_count_existing_keys)
+
 if [ "$TUI" = 1 ]; then
-  whiptail --title "$WIZ_TITLE" --msgbox \
-"This wizard configures channel credentials for Mnemosyne and writes them to:
+  _welcome_body="Welcome to the Mnemosyne setup wizard.
 
-  $ENV_FILE
+Six steps:
+  1. LLM backend (Ollama host + model)
+  2. Telegram channel
+  3. Slack channel
+  4. Obsidian skill (vault path)
+  5. Notion integration
+  6. Write .env atomically (mode 600)
 
-Existing values are reused unless you overwrite them. The .env file will
-be created with mode 600 (owner-readable only). Press Esc/Cancel anytime
-to abort." 16 70
+Target file:  $ENV_FILE
+Existing keys: $_existing_count
+
+Answering 'no' to any step preserves the existing value (never removes).
+Keeping an existing token skips live revalidation (network-flake safe).
+
+Press Esc/Cancel anytime to abort without writing."
+  whiptail --title "$WIZ_TITLE" --msgbox "$_welcome_body" 22 74
 else
   clear 2>/dev/null || true
   hr
   printf "%s  Mnemosyne setup wizard%s\n" "$c_green" "$c_off"
   hr
   echo
-  echo "Configures channel credentials and writes them to:"
-  echo "  $ENV_FILE"
+  printf "  Six steps: LLM ➜ Telegram ➜ Slack ➜ Obsidian ➜ Notion ➜ Write\n"
   echo
-  echo "Existing values are reused unless you overwrite them. ^C anytime to abort."
-  echo "Mode: $([ "$TUI" = 1 ] && echo whiptail || echo text)"
+  echo "  Target file:   $ENV_FILE"
+  echo "  Existing keys: $_existing_count"
+  echo
+  echo "  Mode: $([ "$TUI" = 1 ] && echo whiptail || echo text)"
+  echo "  Answering 'no' preserves existing values. ^C to abort."
   echo
 fi
 

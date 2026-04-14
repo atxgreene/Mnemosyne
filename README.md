@@ -47,6 +47,11 @@ Zero runtime dependencies. Stdlib only. Honest comparison with Hermes Agent, Ope
 | `mnemosyne-wizard.sh` | Interactive post-install wizard (whiptail TUI with text fallback). Six steps: LLM backend, Telegram, Slack, Obsidian, Notion, write `~/projects/mnemosyne/.env`. |
 | `validate-mnemosyne.sh` | Health-check. Four checks (Ollama daemon, model present, Python imports, agent CLI loads). Non-zero exit on failure. |
 | `test-harness.sh` | End-to-end integration test. 29 assertions. No network. |
+| `mnemosyne-dashboard.sh` | Live TUI dashboard — auto-refreshing status: Ollama, experiments, memory tiers, recent events, disk. `--once` for single-shot; `--plain` for non-TTY output. |
+
+### Interactive
+
+`mnemosyne-experiments browse` opens a whiptail menu to navigate runs visually: view details, diff two runs, show Pareto plot, aggregate stats, events stream. Falls back to a plain-text numbered-list mode when whiptail is not installed.
 
 The two Python packages live in their own repos and are cloned by the bootstrap:
 
