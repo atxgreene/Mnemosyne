@@ -83,12 +83,18 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-_SCRIPT_DIR = Path(__file__).parent.resolve()
-sys.path.insert(0, str(_SCRIPT_DIR))
-
-import harness_sweep as sweep  # noqa: E402
-import harness_telemetry as ht  # noqa: E402
-import scenario_runner as sr  # noqa: E402
+# After `pip install -e .` these are plain imports. The fallback keeps the
+# module runnable as a script from an un-installed clone.
+try:
+    import harness_sweep as sweep
+    import harness_telemetry as ht
+    import scenario_runner as sr
+except ImportError:
+    _SCRIPT_DIR = Path(__file__).parent.resolve()
+    sys.path.insert(0, str(_SCRIPT_DIR))
+    import harness_sweep as sweep  # noqa: E402
+    import harness_telemetry as ht  # noqa: E402
+    import scenario_runner as sr  # noqa: E402
 
 
 HarnessCallable = Callable[[str, ht.TelemetrySession], dict[str, Any]]
