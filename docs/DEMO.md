@@ -1,25 +1,30 @@
 Mnemosyne end-to-end demo
-Generated:   2026-04-15T01:59:33+00:00
-Commit:      30e7971
+Generated:   2026-04-15T02:40:10+00:00
+Commit:      2c2c5b6
 Branch:      claude/setup-mnemosyne-consciousness-NZqQE
 Python:      Python 3.11.15
 
 ────────────────────────────────────────────────────────────────
- 1/14  pip install -e . into a fresh venv
+ 1/17  pip install -e . into a fresh venv
 ────────────────────────────────────────────────────────────────
 Successfully built mnemosyne-harness
 Installing collected packages: mnemosyne-harness
-Successfully installed mnemosyne-harness-0.1.0
+Successfully installed mnemosyne-harness-0.2.0
 
 ── Installed console entry points on $PATH:
   environment-snapshot
   harness-telemetry
+  mnemosyne-apply
   mnemosyne-dreams
   mnemosyne-experiments
+  mnemosyne-goals
+  mnemosyne-mcp
   mnemosyne-memory
   mnemosyne-models
   mnemosyne-pipeline
   mnemosyne-proposer
+  mnemosyne-scengen
+  mnemosyne-serve
   mnemosyne-triage
   notion-search
   obsidian-search
@@ -28,7 +33,7 @@ Successfully installed mnemosyne-harness-0.1.0
   ✓ all 7 library surfaces import cleanly
 
 ────────────────────────────────────────────────────────────────
- 2/14  Model providers — 19 backends detected
+ 2/17  Model providers — 19 backends detected
 ────────────────────────────────────────────────────────────────
 
 ── mnemosyne-models list
@@ -62,13 +67,13 @@ default_model:  qwen3:8b
 has_api_key:    False
 
 ────────────────────────────────────────────────────────────────
- 3/14  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)
+ 3/17  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)
 ────────────────────────────────────────────────────────────────
 
 ── environment-snapshot  (human-readable markdown)
 # Mnemosyne environment snapshot
 
-**Projects dir:** /tmp/mnemo-demo-JWk3ji/projects (0 entries)
+**Projects dir:** /tmp/mnemo-demo-MxOkNb/projects (0 entries)
 
 **.env:** not found (run mnemosyne-wizard.sh)
 
@@ -76,7 +81,7 @@ has_api_key:    False
 
 **GPU:** none detected (CPU inference)
 
-**venv:** NOT FOUND at /tmp/mnemo-demo-JWk3ji/projects/.venv
+**venv:** NOT FOUND at /tmp/mnemo-demo-MxOkNb/projects/.venv
 
 **Skills available:** notion-search, obsidian-search
 
@@ -87,7 +92,7 @@ has_api_key:    False
 **Platform:** Linux 6.18.5, Python 3.11.15
 
 ────────────────────────────────────────────────────────────────
- 4/14  Memory layer — SQLite+FTS5 with ICMS 3-tier
+ 4/17  Memory layer — SQLite+FTS5 with ICMS 3-tier
 ────────────────────────────────────────────────────────────────
 
 ── Writing 4 memories across all three tiers
@@ -115,12 +120,12 @@ has_api_key:    False
     "project": 1
   },
   "fts5_enabled": true,
-  "db_path": "/tmp/mnemo-demo-JWk3ji/projects/memory.db",
+  "db_path": "/tmp/mnemo-demo-MxOkNb/projects/memory.db",
   "schema_version": 1
 }
 
 ────────────────────────────────────────────────────────────────
- 5/14  Identity lock — regardless of underlying model, agent says Mnemosyne
+ 5/17  Identity lock — regardless of underlying model, agent says Mnemosyne
 ────────────────────────────────────────────────────────────────
 
 ── Testing enforce_identity() against 5 slip patterns + 3 legitimate uses
@@ -145,7 +150,7 @@ has_api_key:    False
   identity lock: HELD ✓
 
 ────────────────────────────────────────────────────────────────
- 6/14  Skills — agentskills.io-compatible registry + self-improvement
+ 6/17  Skills — agentskills.io-compatible registry + self-improvement
 ────────────────────────────────────────────────────────────────
   Registered skills: ['add']
   OpenAI tool-spec shape:
@@ -175,64 +180,64 @@ has_api_key:    False
 
   Discovered 2 $PATH skills: ['notion_search', 'obsidian_search']
 
-  Learned skill written to: projects/skills/learned/search-and-summarize-20260415-015941.md
+  Learned skill written to: projects/skills/learned/search-and-summarize-20260415-024019.md
   Parsed back:  name=search-and-summarize  learned=True
 
 ────────────────────────────────────────────────────────────────
- 7/14  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT
+ 7/17  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT
 ────────────────────────────────────────────────────────────────
 
 ── Running examples/sweep_demo.py (8-point sweep, fake harness, ~6 seconds)
-sweep complete: 8 runs in 8.9s
+sweep complete: 8 runs in 9.0s
 
 Demo sweep finished: 8 runs created.
 
 Inspect the results:
 
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py list
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py top-k 3 --metric accuracy
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py top-k 3 --metric latency_ms_avg --direction min
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py pareto \
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-MxOkNb/projects ./mnemosyne-experiments.py list
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-MxOkNb/projects ./mnemosyne-experiments.py top-k 3 --metric accuracy
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-MxOkNb/projects ./mnemosyne-experiments.py top-k 3 --metric latency_ms_avg --direction min
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-MxOkNb/projects ./mnemosyne-experiments.py pareto \
       --axes accuracy,latency_ms_avg --directions max,min --plot
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py aggregate run_20260415-015941-mode-qwen3-8b-retr-5-temp-00
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-MxOkNb/projects ./mnemosyne-experiments.py aggregate run_20260415-024019-mode-qwen3-8b-retr-5-temp-00
 
 ── mnemosyne-experiments list  (newest first)
-run_20260415-015949-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:49  events=42     tags=sweep,demo,example
-run_20260415-015948-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:48  events=42     tags=sweep,demo,example
-run_20260415-015947-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:47  events=42     tags=sweep,demo,example
-run_20260415-015946-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:46  events=42     tags=sweep,demo,example
-run_20260415-015945-mode-qwen3-8b-retr-15-temp-05  [completed]  qwen3:8b            2026-04-15 01:59:45  events=42     tags=sweep,demo,example
-run_20260415-015944-mode-qwen3-8b-retr-15-temp-00  [completed]  qwen3:8b            2026-04-15 01:59:44  events=42     tags=sweep,demo,example
-run_20260415-015942-mode-qwen3-8b-retr-5-temp-05  [completed]  qwen3:8b            2026-04-15 01:59:42  events=42     tags=sweep,demo,example
-run_20260415-015941-mode-qwen3-8b-retr-5-temp-00  [completed]  qwen3:8b            2026-04-15 01:59:41  events=42     tags=sweep,demo,example
+run_20260415-024027-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 02:40:27  events=42     tags=sweep,demo,example
+run_20260415-024026-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 02:40:26  events=42     tags=sweep,demo,example
+run_20260415-024025-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 02:40:25  events=42     tags=sweep,demo,example
+run_20260415-024024-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 02:40:24  events=42     tags=sweep,demo,example
+run_20260415-024023-mode-qwen3-8b-retr-15-temp-05  [completed]  qwen3:8b            2026-04-15 02:40:23  events=42     tags=sweep,demo,example
+run_20260415-024022-mode-qwen3-8b-retr-15-temp-00  [completed]  qwen3:8b            2026-04-15 02:40:22  events=42     tags=sweep,demo,example
+run_20260415-024020-mode-qwen3-8b-retr-5-temp-05  [completed]  qwen3:8b            2026-04-15 02:40:20  events=42     tags=sweep,demo,example
+run_20260415-024019-mode-qwen3-8b-retr-5-temp-00  [completed]  qwen3:8b            2026-04-15 02:40:19  events=42     tags=sweep,demo,example
 
 ── Top 3 by accuracy:
 Top 3 runs by accuracy (max):
-  run_20260415-015948-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  model=gemma4:e4b
-  run_20260415-015946-mode-gemma4-e-retr-5-temp-00  accuracy=0.5  model=gemma4:e4b
-  run_20260415-015944-mode-qwen3-8b-retr-15-temp-00  accuracy=0.5  model=qwen3:8b
+  run_20260415-024026-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  model=gemma4:e4b
+  run_20260415-024024-mode-gemma4-e-retr-5-temp-00  accuracy=0.5  model=gemma4:e4b
+  run_20260415-024022-mode-qwen3-8b-retr-15-temp-00  accuracy=0.5  model=qwen3:8b
 
 ── Pareto frontier on accuracy × latency  (ASCII plot):
 Pareto frontier on (accuracy, latency_ms_avg) with directions (max, min):
-  run_20260415-015948-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  latency_ms_avg=54.22643793748705  model=gemma4:e4b
+  run_20260415-024026-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  latency_ms_avg=54.36928024998622  model=gemma4:e4b
 
   latency_ms_avg
-    85.39 |.                         .                         
-    83.32 |                                                    
-    81.24 |                                                    
-    79.16 |                                                    
-    77.08 |                                                   .
-    75.00 |                                                   .
-    72.93 |                                                    
-    70.85 |                                                    
-    68.77 |                                                    
-    66.69 |                                                    
-    64.62 |                                                    
-    62.54 |                          .                         
-    60.46 |                          .                         
-    58.38 |                                                    
-    56.30 |                                                    
-    54.23 |                                                   #
+    85.54 |.                         .                         
+    83.46 |                                                    
+    81.38 |                                                    
+    79.31 |                                                    
+    77.23 |                                                   .
+    75.15 |                                                   .
+    73.07 |                                                    
+    70.99 |                                                    
+    68.92 |                                                    
+    66.84 |                                                    
+    64.76 |                                                    
+    62.68 |                          .                         
+    60.60 |                          .                         
+    58.53 |                                                    
+    56.45 |                                                    
+    54.37 |                                                   #
           +----------------------------------------------------
           0.38                                            0.50
                                 accuracy
@@ -240,11 +245,11 @@ Pareto frontier on (accuracy, latency_ms_avg) with directions (max, min):
   legend:  * = on Pareto frontier   . = dominated   # = overlap
 
 ────────────────────────────────────────────────────────────────
- 8/14  Aggregate statistics — per-tool call counts, latency percentiles
+ 8/17  Aggregate statistics — per-tool call counts, latency percentiles
 ────────────────────────────────────────────────────────────────
 
-── aggregate for run_20260415-015949-mode-gemma4-e-retr-15-temp-05
-# aggregate for run_20260415-015949-mode-gemma4-e-retr-15-temp-05
+── aggregate for run_20260415-024027-mode-gemma4-e-retr-15-temp-05
+# aggregate for run_20260415-024027-mode-gemma4-e-retr-15-temp-05
 
 total events: 42
   scenario_end   16
@@ -259,15 +264,15 @@ total events: 42
   ok:           7
   errors:       0
   success_rate: 100.00%
-  duration_ms:  avg=20.9  p50=23.2  p95=30.9  p99=30.9  total=146.1
+  duration_ms:  avg=20.9  p50=23.2  p95=30.9  p99=30.9  total=146.4
 
 ## per-tool
   tool                           calls      ok     err     rate    avg_ms    p95_ms
   notion_search                      3       3       0  100.0%      26.5      30.9
-  obsidian_search                    4       4       0  100.0%      16.6      28.8
+  obsidian_search                    4       4       0  100.0%      16.7      28.9
 
 ────────────────────────────────────────────────────────────────
- 9/14  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)
+ 9/17  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)
 ────────────────────────────────────────────────────────────────
 
 ── mnemosyne-triage scan --window-days 30  (reads events.jsonl from our demo runs)
@@ -283,7 +288,7 @@ Mnemosyne health — grade D
   top 1 clusters:
     [ 61.2]  scenario_end            -                   -  (n=69, runs=8)
 
-  report written: /tmp/mnemo-demo-JWk3ji/projects/health/2026-04-15.md
+  report written: /tmp/mnemo-demo-MxOkNb/projects/health/2026-04-15.md
 
 ── Daily health report was written to:
   2026-04-15.md
@@ -291,7 +296,7 @@ Mnemosyne health — grade D
 ── First 20 lines of the report:
   # Mnemosyne health report — 2026-04-15
   
-  **Grade: D**  ·  window: 30d  ·  runs: 8  ·  events: 336  ·  generated: 2026-04-15T01:59:50.773947Z
+  **Grade: D**  ·  window: 30d  ·  runs: 8  ·  events: 336  ·  generated: 2026-04-15T02:40:28.952211Z
   
   ## Headline metrics
   
@@ -308,21 +313,21 @@ Mnemosyne health — grade D
   - tool: `-`
   - error_type: `-`
   - count: 69  ·  runs: 8
-  - first seen: `2026-04-15T01:59:42.142896Z`
+  - first seen: `2026-04-15T02:40:20.288341Z`
 
 ────────────────────────────────────────────────────────────────
- 10/14  Meta-Harness proposer — triage → proposals (rule-based v1)
+ 10/17  Meta-Harness proposer — triage → proposals (rule-based v1)
 ────────────────────────────────────────────────────────────────
 
 ── Seed an identity-slip event so the proposer has something to react to
-  seeded run: run_20260415-015950-976e38
+  seeded run: run_20260415-024029-5c25c3
 
 ── mnemosyne-proposer --min-severity 0  (rule engine reads triage clusters)
 Generated 2 proposal(s):
   [ 61.2] PROP-0001 skill    Scenario failures clustered (69 events, severity 61.2)
   [ 52.5] PROP-0002 identity Identity slips recurring (12 events, severity 52.5)
 
-Written to: /tmp/mnemo-demo-JWk3ji/projects/proposals/
+Written to: /tmp/mnemo-demo-MxOkNb/projects/proposals/
 
 ── Proposal written to disk:
   PROP-0001-scenario-failures-clustered-69-events-se.md
@@ -331,7 +336,7 @@ Written to: /tmp/mnemo-demo-JWk3ji/projects/proposals/
 ── First 25 lines of the newest proposal:
   ---
   id: PROP-0002
-  created_utc: 2026-04-15T01:59:50.873849Z
+  created_utc: 2026-04-15T02:40:29.068791Z
   status: pending
   severity: 52.5
   cluster_id: 75efbe3366fa
@@ -356,7 +361,7 @@ Written to: /tmp/mnemo-demo-JWk3ji/projects/proposals/
   Run the 6 identity scenarios in `scenarios.example.jsonl` against the candidate configuration via `harness_sweep`. Target: `identity_slip_rate_per_1000 == 0` on the follow-up triage scan.
 
 ────────────────────────────────────────────────────────────────
- 11/14  Dream consolidation — offline pattern extraction from L3 cold
+ 11/17  Dream consolidation — offline pattern extraction from L3 cold
 ────────────────────────────────────────────────────────────────
 
 ── Seed 12 related L3 memories (user-preference pattern)
@@ -364,7 +369,7 @@ Written to: /tmp/mnemo-demo-JWk3ji/projects/proposals/
   L3 count: 13
 
 ── mnemosyne-dreams  (stdlib summarizer, no LLM calls)
-  dream: dream-20260415T015950Z
+  dream: dream-20260415T024029Z
     scanned:   13 memories
     clusters:  2
     abstracts: 2 (stdlib)
@@ -375,10 +380,10 @@ Written to: /tmp/mnemo-demo-JWk3ji/projects/proposals/
       Pattern across 6 memories: user uses dark mode in vscode editor
 
 ── Dream report JSON:
-  dream-20260415T015950Z.json
+  dream-20260415T024029Z.json
 
 ────────────────────────────────────────────────────────────────
- 12/14  Inner dialogue — Planner → Critic → Doer on tagged turns
+ 12/17  Inner dialogue — Planner → Critic → Doer on tagged turns
 ────────────────────────────────────────────────────────────────
   ── untagged turn (single-pass path)
     answer: single-pass answer
@@ -389,20 +394,66 @@ Written to: /tmp/mnemo-demo-JWk3ji/projects/proposals/
     model calls: 3  (planner + critic + doer)
 
 ────────────────────────────────────────────────────────────────
- 13/14  Live dashboard (single frame via --once --plain)
+ 13/17  Goal stack — persistent TODOs across sessions
 ────────────────────────────────────────────────────────────────
-Mnemosyne dashboard   2026-04-15T01:59:51+00:00
-$PROJECTS_DIR: /tmp/mnemo-demo-JWk3ji/projects
+
+── Seed two goals via the CLI
+  added: #1  P1  ship v0.2.0 release notes
+  added: #2  P3  review Peter Pang article for loop ideas
+
+── List open goals (priority-sorted)
+    [ ] #1    P1  ship v0.2.0 release notes [release, docs]
+    [ ] #2    P3  review Peter Pang article for loop ideas [reading]
+
+── Brain with goals_inject=True surfaces them in the first-turn system prompt
+  ## Open goals (across sessions)
+  - (P1) #1: ship v0.2.0 release notes [release, docs]
+  - (P3) #2: review Peter Pang article for loop ideas [reading]
+
+────────────────────────────────────────────────────────────────
+ 14/17  Apply-agent — closes the Meta-Harness loop
+────────────────────────────────────────────────────────────────
+
+── Mark one identity proposal as accepted, then run mnemosyne-apply
+  marked accepted: PROP-0002-identity-slips-recurring-12-events-sever.md
+    [applied         ] PROP-0002    identity   identity scenarios re-scanned. slips_caught=0
+
+── Proposal status after apply:
+  ---
+  id: PROP-0002
+  created_utc: 2026-04-15T02:40:29.068791Z
+  status: applied
+  severity: 52.5
+  cluster_id: 75efbe3366fa
+  category: identity
+  applied_utc: 2026-04-15T02:40:29.575760Z
+  apply_notes: identity scenarios re-scanned. slips_caught=0
+  ---
+
+────────────────────────────────────────────────────────────────
+ 15/17  MCP bridge — Mnemosyne skills exposed as Model Context Protocol tools
+────────────────────────────────────────────────────────────────
+
+── mnemosyne-mcp serve reads JSON-RPC from stdin; we drive it inline
+  id=1  result: {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "mnemosyne", "version": "0.2.0"}...
+  id=2  result: {"tools": [{"name": "echo", "description": "return the input unchanged", "inputSchema": {"type": "object", "properties":...
+  id=3  result: {"content": [{"type": "text", "text": "{\"echoed\": \"hi from MCP\"}"}]}
+
+────────────────────────────────────────────────────────────────
+ 16/17  Live dashboard (single frame via --once --plain)
+────────────────────────────────────────────────────────────────
+Mnemosyne dashboard   2026-04-15T02:40:29+00:00
+$PROJECTS_DIR: /tmp/mnemo-demo-MxOkNb/projects
 ────────────────────────────────────────────────────────────────
 Ollama: not reachable at http://localhost:11434
 Experiments: 9 runs, 312K on disk
 ────────────────────────────────────────────────────────────────
 Last 5 runs:
-  run_20260415-015950-976e38  [completed]  demo-model          2026-04-15 01:59:50  events=14     tags=proposer-demo
-  run_20260415-015949-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:49  events=42     tags=sweep,demo,example
-  run_20260415-015948-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:48  events=42     tags=sweep,demo,example
-  run_20260415-015947-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:47  events=42     tags=sweep,demo,example
-  run_20260415-015946-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:46  events=42     tags=sweep,demo,example
+  run_20260415-024029-5c25c3  [completed]  demo-model          2026-04-15 02:40:29  events=14     tags=proposer-demo
+  run_20260415-024027-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 02:40:27  events=42     tags=sweep,demo,example
+  run_20260415-024026-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 02:40:26  events=42     tags=sweep,demo,example
+  run_20260415-024025-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 02:40:25  events=42     tags=sweep,demo,example
+  run_20260415-024024-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 02:40:24  events=42     tags=sweep,demo,example
 ────────────────────────────────────────────────────────────────
 Memory:
   {
@@ -419,7 +470,7 @@ Memory:
       "project": 1
     },
     "fts5_enabled": true,
-    "db_path": "/tmp/mnemo-demo-JWk3ji/projects/memory.db",
+    "db_path": "/tmp/mnemo-demo-MxOkNb/projects/memory.db",
     "schema_version": 1
   }
 ────────────────────────────────────────────────────────────────
@@ -433,7 +484,7 @@ Recent events (latest run):
 Disk: /dev/vda        252G  7.3G   30G  20% /
 
 ────────────────────────────────────────────────────────────────
- 14/14  Test suite
+ 17/17  Test suite
 ────────────────────────────────────────────────────────────────
 
 ── bash test-harness.sh (integration)
@@ -444,15 +495,16 @@ Disk: /dev/vda        252G  7.3G   30G  20% /
 
 ── python3 tests/test_all.py (unit)
 
-[1;32m122/122 tests passed[0m in 1.21s
+[1;32m145/145 tests passed[0m in 1.38s
 
 ────────────────────────────────────────────────────────────────
  Demo complete.
 ────────────────────────────────────────────────────────────────
 
-All 14 sections exercised. Identity lock holds across slip attempts.
-Triage clusters real events, proposer writes reviewable markdown,
-dreams compress L3 cold memories, inner dialogue fires on hard turns.
+All 17 sections exercised. Identity lock holds across slip attempts.
+Triage → proposer → apply closes the Meta-Harness loop end-to-end.
+Dreams compress L3 cold memories; inner dialogue fires on hard turns.
+Goal stack persists across sessions; MCP bridge exposes skills.
 Full pipeline produces real experiments in the fake PROJECTS_DIR and
 the CLI tools read them back without sys.path shims. All tests pass.
 

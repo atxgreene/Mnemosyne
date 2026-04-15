@@ -123,6 +123,7 @@ class Backend:
     api_key: str | None = None     # override env-var lookup
     default_model: str = "qwen3:8b"
     timeout_s: float = 120.0
+    rate_limiter: Any = None       # optional RateLimiter; shared across Backends is fine
 
     def __post_init__(self) -> None:
         if self.provider not in PROVIDERS and self.url is None:
@@ -159,6 +160,8 @@ def chat(
     max_tokens: int | None = None,
     telemetry: Any | None = None,
     extra: dict[str, Any] | None = None,
+    stream: bool = False,
+    rate_limiter: "RateLimiter | None" = None,
 ) -> dict[str, Any]:
     """Run a chat completion against the configured backend.
 
@@ -190,12 +193,24 @@ def chat(
     backend = backend or Backend()
     mdl = model or backend.default_model
 
+    # Rate limit if a limiter is configured on the backend or passed explicitly.
+    limiter = rate_limiter or getattr(backend, "rate_limiter", None)
+    if limiter is not None:
+        try:
+            limiter.acquire(backend.provider)
+        except Exception:
+            pass  # limiter must never break inference
+
     if backend.provider == "ollama":
         payload = _ollama_payload(messages, mdl, tools, temperature, max_tokens, extra)
     elif backend.provider == "anthropic":
         payload = _anthropic_payload(messages, mdl, tools, temperature, max_tokens, extra)
     else:
         payload = _openai_payload(messages, mdl, tools, temperature, max_tokens, extra)
+
+    if stream:
+        payload["stream"] = True
+        return _chat_stream(messages, payload, backend, mdl, telemetry)
 
     headers = {
         "Content-Type": "application/json",
@@ -287,6 +302,286 @@ def chat(
             pass  # telemetry must never break inference
 
     return result
+
+
+# ---- streaming chat ---------------------------------------------------------
+
+def _chat_stream(
+    messages: list[dict[str, Any]],
+    payload: dict[str, Any],
+    backend: Backend,
+    mdl: str,
+    telemetry: Any | None,
+) -> dict[str, Any]:
+    """Streaming chat. Returns a dict with the same keys as chat() plus
+    a `chunks` generator. The caller iterates `chunks` to get deltas.
+    Providers emit different line shapes — we normalise:
+
+        Ollama:   NDJSON (one JSON object per line)
+        OpenAI-compatible: SSE ("data: {json}\\n\\n", terminated by "data: [DONE]")
+        Anthropic: SSE with typed events
+
+    The generator yields dicts of shape {"delta": str, "raw": <provider event>}.
+    When the stream ends, the generator also sets `.text` / `.usage` on the
+    outer result so callers that want the final concatenation can wait for
+    completion.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream" if backend.provider != "ollama" else "application/x-ndjson",
+        "User-Agent": "mnemosyne/0.2.0",
+    }
+    api_key = backend.resolve_api_key()
+    if api_key:
+        if backend.provider == "anthropic":
+            headers["x-api-key"] = api_key
+            headers["anthropic-version"] = "2023-06-01"
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib.request.Request(
+        backend.endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    started = time.monotonic()
+    text_parts: list[str] = []
+    usage: dict[str, int] | None = None
+
+    def gen():
+        nonlocal usage
+        try:
+            with urllib.request.urlopen(req, timeout=backend.timeout_s) as r:
+                for raw_line in r:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line:
+                        continue
+                    delta = ""
+                    raw_evt: Any = line
+                    if backend.provider == "ollama":
+                        try:
+                            obj = json.loads(line)
+                            raw_evt = obj
+                            delta = (obj.get("message") or {}).get("content", "") or obj.get("response", "")
+                            if obj.get("done"):
+                                if obj.get("eval_count"):
+                                    usage = {
+                                        "prompt_tokens": obj.get("prompt_eval_count", 0),
+                                        "completion_tokens": obj.get("eval_count", 0),
+                                        "total_tokens": obj.get("prompt_eval_count", 0) + obj.get("eval_count", 0),
+                                    }
+                        except Exception:
+                            continue
+                    else:
+                        # SSE style: "data: {...}" or "data: [DONE]"
+                        if not line.startswith("data:"):
+                            continue
+                        payload_s = line[5:].strip()
+                        if payload_s in ("[DONE]", ""):
+                            continue
+                        try:
+                            obj = json.loads(payload_s)
+                            raw_evt = obj
+                        except Exception:
+                            continue
+                        if backend.provider == "anthropic":
+                            if obj.get("type") == "content_block_delta":
+                                d = obj.get("delta") or {}
+                                delta = d.get("text") or ""
+                            elif obj.get("type") == "message_delta":
+                                u = (obj.get("usage") or {})
+                                if u:
+                                    usage = {
+                                        "prompt_tokens": u.get("input_tokens", 0),
+                                        "completion_tokens": u.get("output_tokens", 0),
+                                        "total_tokens": u.get("input_tokens", 0) + u.get("output_tokens", 0),
+                                    }
+                        else:
+                            # OpenAI-compatible
+                            choices = obj.get("choices") or []
+                            if choices:
+                                d = choices[0].get("delta") or {}
+                                delta = d.get("content") or ""
+                            u = obj.get("usage")
+                            if u:
+                                usage = {
+                                    "prompt_tokens": u.get("prompt_tokens", 0),
+                                    "completion_tokens": u.get("completion_tokens", 0),
+                                    "total_tokens": u.get("total_tokens", 0),
+                                }
+                    if delta:
+                        text_parts.append(delta)
+                    yield {"delta": delta, "raw": raw_evt}
+        finally:
+            duration_ms = (time.monotonic() - started) * 1000.0
+            if telemetry is not None:
+                try:
+                    telemetry.log(
+                        "model_call",
+                        args={"provider": backend.provider, "model": mdl,
+                              "message_count": len(messages), "stream": True},
+                        result={"text_len": sum(len(p) for p in text_parts),
+                                "usage": usage},
+                        duration_ms=duration_ms,
+                        status="ok",
+                    )
+                except Exception:
+                    pass
+
+    return {
+        "chunks": gen(),
+        "text_parts": text_parts,     # populated as stream consumed
+        "usage_ref": lambda: usage,   # lambda so callers can read after consumption
+        "raw": {},
+        "status": "ok",
+        "error": None,
+        "model": mdl,
+        "provider": backend.provider,
+        # Convenience: drain the stream into a final dict
+        "drain": lambda: {
+            "text": "".join(list(text_parts)) if isinstance(text_parts, list) else "",
+            "tool_calls": [],
+            "usage": usage,
+            "status": "ok",
+            "provider": backend.provider,
+            "model": mdl,
+        },
+    }
+
+
+# ---- rate limiter -----------------------------------------------------------
+
+class RateLimiter:
+    """Per-provider token-bucket rate limiter.
+
+    Backends can carry their own limiter (`Backend(rate_limiter=...)`) or
+    callers can pass a shared one to `chat(rate_limiter=...)`. The limiter
+    blocks until a token is available.
+
+    Not the fanciest limiter — no smoothing, no adaptive rates — just
+    enough to keep cloud bills bounded for bursty agent work.
+
+    Usage:
+        limiter = RateLimiter(default_rps=1.0,
+                              per_provider={"openai": 5.0, "anthropic": 2.0})
+        chat(messages, backend=backend, rate_limiter=limiter)
+    """
+
+    def __init__(
+        self,
+        *,
+        default_rps: float = 5.0,
+        per_provider: dict[str, float] | None = None,
+        burst: int = 3,
+    ) -> None:
+        import threading
+        self.default_rps = max(0.001, default_rps)
+        self.per_provider = dict(per_provider or {})
+        self.burst = max(1, burst)
+        self._tokens: dict[str, float] = {}
+        self._last: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _rate(self, provider: str) -> float:
+        return self.per_provider.get(provider, self.default_rps)
+
+    def acquire(self, provider: str, timeout: float = 30.0) -> None:
+        """Block until a token is available for `provider`, or raise on timeout."""
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                rate = self._rate(provider)
+                last = self._last.get(provider, now)
+                tokens = self._tokens.get(provider, float(self.burst))
+                # Refill
+                tokens = min(float(self.burst), tokens + (now - last) * rate)
+                if tokens >= 1.0:
+                    self._tokens[provider] = tokens - 1.0
+                    self._last[provider] = now
+                    return
+                # How long to wait for one token
+                wait = (1.0 - tokens) / rate
+                self._tokens[provider] = tokens
+                self._last[provider] = now
+            if time.monotonic() + wait > deadline:
+                raise TimeoutError(f"rate-limit timeout for provider {provider!r}")
+            time.sleep(min(wait, 0.25))
+
+
+# ---- cost pricing -----------------------------------------------------------
+
+# Prices are USD per 1M tokens. Sourced from public provider pages as of 2026-04;
+# these will drift — override at call time via `cost(...price_override=...)`.
+# Keys match Backend(default_model=...) exactly when possible; fall back to
+# substring match (e.g. "gpt-4o" matches "gpt-4o-2024-08-06").
+DEFAULT_PRICING: dict[str, dict[str, float]] = {
+    # OpenAI
+    "gpt-4o":              {"prompt": 2.50,  "completion": 10.00},
+    "gpt-4o-mini":         {"prompt": 0.15,  "completion": 0.60},
+    "gpt-4-turbo":         {"prompt": 10.00, "completion": 30.00},
+    "o1":                  {"prompt": 15.00, "completion": 60.00},
+    "o1-mini":             {"prompt": 3.00,  "completion": 12.00},
+    # Anthropic
+    "claude-opus-4":       {"prompt": 15.00, "completion": 75.00},
+    "claude-sonnet-4":     {"prompt": 3.00,  "completion": 15.00},
+    "claude-haiku-4":      {"prompt": 0.80,  "completion": 4.00},
+    "claude-3-5-sonnet":   {"prompt": 3.00,  "completion": 15.00},
+    "claude-3-5-haiku":    {"prompt": 0.80,  "completion": 4.00},
+    # Google
+    "gemini-2.0-flash":    {"prompt": 0.10,  "completion": 0.40},
+    "gemini-2.0-pro":      {"prompt": 1.25,  "completion": 5.00},
+    # xAI
+    "grok-3":              {"prompt": 2.00,  "completion": 10.00},
+    # Local / free
+    "ollama":              {"prompt": 0.00,  "completion": 0.00},
+    "qwen3.5":             {"prompt": 0.00,  "completion": 0.00},
+    "gemma4":              {"prompt": 0.00,  "completion": 0.00},
+}
+
+
+def cost_for(
+    model: str,
+    usage: dict[str, int] | None,
+    *,
+    price_override: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Estimate USD cost given a usage dict {prompt_tokens, completion_tokens}.
+
+    Returns {"prompt_usd": x, "completion_usd": y, "total_usd": z, "matched": "model-key"}.
+    """
+    if not usage:
+        return {"prompt_usd": 0.0, "completion_usd": 0.0, "total_usd": 0.0, "matched": ""}
+
+    price = price_override
+    matched = model
+    if price is None:
+        # exact match wins
+        if model in DEFAULT_PRICING:
+            price = DEFAULT_PRICING[model]
+        else:
+            # substring match (prefix)
+            for k, v in DEFAULT_PRICING.items():
+                if model.startswith(k):
+                    price = v
+                    matched = k
+                    break
+    if price is None:
+        # Unknown model — no pricing data
+        return {"prompt_usd": 0.0, "completion_usd": 0.0, "total_usd": 0.0, "matched": ""}
+
+    pt = usage.get("prompt_tokens", 0) or 0
+    ct = usage.get("completion_tokens", 0) or 0
+    p_usd = pt * price["prompt"] / 1_000_000.0
+    c_usd = ct * price["completion"] / 1_000_000.0
+    return {
+        "prompt_usd": round(p_usd, 6),
+        "completion_usd": round(c_usd, 6),
+        "total_usd": round(p_usd + c_usd, 6),
+        "matched": matched,
+    }
 
 
 # ---- payload builders -------------------------------------------------------

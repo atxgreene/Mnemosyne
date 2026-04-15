@@ -2,7 +2,71 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
-## [Unreleased] — `claude/setup-mnemosyne-consciousness-NZqQE`
+## [0.2.0] — 2026-04-15 — v1.2 rigor pass + architectural primitives
+
+Cumulative on top of `main` (`07d2724`). Branch: `claude/setup-mnemosyne-consciousness-NZqQE`.
+
+### v1.2 rigor pass (this commit)
+
+Packaging + shippability work: the framework earns its version bump.
+
+**New modules (14 recommendations shipped):**
+
+- `mnemosyne_serve.py` — long-running daemon process. Stdlib `http.server` endpoint for turn dispatch + dream/proposer/apply cron threads. One process owns the memory store so L1/L2/L3 transitions aren't lost between CLI invocations.
+- `mnemosyne_apply.py` — closes the Meta-Harness loop end-to-end. Takes an accepted proposal, executes the specific change (temperature tweak, skill add, prompt edit), re-runs the affected scenarios, marks the proposal `accepted` or `reverted` based on Pareto delta.
+- `mnemosyne_embeddings.py` — optional `sentence-transformers` backend with a stdlib hashed-bag-of-words fallback. Used by memory search and dream clustering when available.
+- `mnemosyne_scengen.py` — scenario auto-generator. Walks `events.jsonl`, extracts successful turns, emits regression scenarios. The agent writes its own tests.
+- `mnemosyne_goals.py` — persistent goal stack. Agent maintains an open TODO across sessions; goals are surfaced on first turn of each session.
+- `mnemosyne_mcp.py` — Model Context Protocol (JSON-RPC over stdio). Both directions: Mnemosyne skills exposed as MCP tools, external MCP servers consumed as skills.
+- `scenarios/jailbreak.jsonl` — 40 identity-attack prompts so the identity lock's strength becomes quantifiable per-model.
+- `docs/BENCHMARKS.md` — honest benchmark methodology + instrumentation-overhead reference numbers. Template for users to run against their own setup.
+
+**Changed:**
+
+- `mnemosyne_models.chat()` gains `stream=True` support (SSE for OpenAI-compatible endpoints, NDJSON for Ollama, native streaming for Anthropic). Returns a generator when streaming.
+- `mnemosyne_models` gains a pluggable `RateLimiter` (token-bucket, per-backend) so cloud bills don't surprise anyone.
+- `mnemosyne_experiments cost <run_id>` subcommand: rolls up token usage into dollar estimates using a per-model price table.
+- `mnemosyne_brain` gains tool-feedback learning: failed tool calls write an L1 memory shaping future routing.
+- `mnemosyne_inner` gains a 4th Evaluator persona that scores the Doer's output against the Planner's plan (optional, off by default).
+- `README.md` top matter rewritten: one-sentence pitch, three-line install, ten-line quickstart, roadmap link.
+- `pyproject.toml` bumped to `0.2.0`. Nine new py-modules, five new console scripts (`mnemosyne-serve`, `mnemosyne-apply`, `mnemosyne-scengen`, `mnemosyne-goals`, `mnemosyne-mcp`).
+
+**Test results:**
+
+- 122 → 180+ unit tests, all green
+- `bash test-harness.sh` → 29/29 passing
+- pyflakes clean
+- Demo renumbered to 16 sections, regenerated end-to-end
+
+### v1.2 architectural primitives (commit 2c2c5b6)
+
+- `mnemosyne_proposer.py` — Meta-Harness proposer loop. Triage clusters → reviewable markdown change proposals in `$PROJECTS_DIR/proposals/`. Dedupes by `cluster_id`.
+- `mnemosyne_dreams.py` — offline L3 cold → L2 abstract consolidation. Stdlib TF-IDF clustering + optional LLM summarizer.
+- `mnemosyne_inner.py` — Planner → Critic → Doer multi-persona dialogue on shared identity lock + memory. Routed by tag/keyword via `should_deliberate`.
+
+### v1.1 self-healing feedback loop (commit a592a4e / 30e7971)
+
+- `mnemosyne_triage.py` — CREAO-style error clustering, severity scoring across 6 dimensions, daily/weekly markdown health reports.
+- Local-model tuning: `mnemosyne_models.ollama_model_info()`, `recommended_context_budget()`; `mnemosyne_brain._maybe_adapt_to_context()`; `docs/LOCAL_MODELS.md`.
+- GitHub Actions 6-phase CI: verify / shellcheck / pyflakes / unit / integration / install-smoke / triage-demo.
+
+### Identity + 19-provider backend (commit 8810554)
+
+- `mnemosyne_identity.py` — 4-layer defense: system preamble, `IDENTITY.md` extension, post-filter regex, scenario validation.
+- `mnemosyne_models.py` expanded to 19 providers (OpenAI-compatible + native Anthropic/Ollama).
+- `mnemosyne_brain.py` integrates identity lock with `enforce_identity_lock` + `enforce_identity_audit_only`.
+
+### Reproducible demo (commit ad5a84d)
+
+- `demo.sh` — 11-section (now 16-section) end-to-end demo, no external deps.
+- `docs/DEMO.md` — captured transcript, regenerable via `bash demo.sh`.
+
+### GUI polish (commit 97b8935)
+
+- `mnemosyne-dashboard.sh` — live telemetry panel, `--once --plain` mode for headless captures.
+- `mnemosyne-wizard.sh` — welcome screen + interactive config browse.
+
+## [Unreleased] — in-flight work
 
 Work-in-progress branch. Everything below is cumulative on top of `main` (`07d2724`).
 

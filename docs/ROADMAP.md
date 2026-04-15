@@ -27,13 +27,24 @@ install -e . && ./demo.sh` on a fresh laptop?" If yes, it's verifiable.
 | Local-model context adaptation | `mnemosyne_brain._maybe_adapt_to_context` | 3 tests |
 | Triage / clustering + severity scoring | `mnemosyne_triage` | 8+ tests |
 | **Meta-Harness proposer (rule-based v1)** | `mnemosyne_proposer` | 4 tests |
+| **Apply agent (closes the loop)** | `mnemosyne_apply` | 4 tests |
 | **Dream consolidation (stdlib + optional LLM)** | `mnemosyne_dreams` | 4 tests |
-| **Multi-persona inner dialogue** | `mnemosyne_inner` | 4 tests + 3 brain-integration tests |
-| 9-command CLI entry point (via `pip install -e .`) | `pyproject.toml` | CI install-smoke |
+| **Multi-persona inner dialogue (Planner / Critic / Doer / Evaluator)** | `mnemosyne_inner` | 6 tests + 3 brain-integration tests |
+| **Goal stack (persistent TODO across sessions)** | `mnemosyne_goals` | 3 tests |
+| **Streaming chat API** | `mnemosyne_models.chat(stream=True)` | parser bits covered; live stream requires running model |
+| **Rate limiter (token-bucket, per-backend)** | `mnemosyne_models.RateLimiter` | 2 tests |
+| **Cost accounting (`mnemosyne-experiments cost`)** | `mnemosyne_experiments` + `mnemosyne_models.cost_for` | 4 tests |
+| **Scenario auto-generator** | `mnemosyne_scengen` | 2 tests |
+| **Embeddings (hashed-BOW fallback + optional sentence-transformers)** | `mnemosyne_embeddings` | 3 tests |
+| **MCP bridge (both directions)** | `mnemosyne_mcp` | protocol-level test with piped stdio |
+| **Tool-feedback learning (L1 failure notes)** | `mnemosyne_brain` | 1 test |
+| **Long-running daemon** | `mnemosyne_serve` | smoke-tested via HTTP; runs dreams/triage/proposer on cron |
+| **Jailbreak scenario suite (40 prompts)** | `scenarios/jailbreak.jsonl` | run with `mnemosyne-pipeline` on your backend |
+| 14-command CLI entry point (via `pip install -e .`) | `pyproject.toml` | CI install-smoke |
 | 6-phase GitHub Actions CI | `.github/workflows/ci.yml` | runs on every push |
 
-Full test count: **122 unit tests** + shellcheck + pyflakes + install-smoke
-+ triage-demo + end-to-end `demo.sh`.
+Full test count: **145 unit tests** + shellcheck + pyflakes + install-smoke
++ triage-demo + end-to-end `demo.sh` (17 sections).
 
 ---
 

@@ -143,9 +143,9 @@ class BrainConfig:
     # conversation). Safe no-op on cloud providers.
     adapt_to_context: bool = True
 
-    # Inner dialogue (Planner → Critic → Doer). Costs ~3x model calls so
-    # it is off by default and only fires on tagged turns or turns whose
-    # prompt matches one of the trigger keywords. See mnemosyne_inner.
+    # Inner dialogue (Planner → Critic → Doer → Evaluator). Costs ~3-4x model
+    # calls so it is off by default and only fires on tagged turns or turns
+    # whose prompt matches one of the trigger keywords. See mnemosyne_inner.
     inner_dialogue_enabled: bool = False
     inner_dialogue_tags: set[str] = field(
         default_factory=lambda: set(inner_mod.DEFAULT_TRIGGER_TAGS)
@@ -153,12 +153,27 @@ class BrainConfig:
     inner_dialogue_keywords: set[str] = field(
         default_factory=lambda: set(inner_mod.DEFAULT_TRIGGER_KEYWORDS)
     )
+    # Evaluator persona scores the Doer's output against the Plan. Adds
+    # one more model call on inner-dialogue turns. Off by default.
+    inner_dialogue_evaluator: bool = False
 
     # Dream consolidation. When set, the brain calls mnemosyne_dreams.consolidate
     # every N turns (idle-ish check — dreams only fire if there are enough L3
     # memories to be worth the effort). Zero-cost when set to 0 (default).
     dreams_after_n_turns: int = 0
     dreams_min_memories: int = 20        # don't dream unless L3 has ≥ this many
+
+    # Tool-feedback learning: when a tool call errors, write a small L1
+    # "failure_note" memory so future routing is informed. Off by default
+    # because memory growth under rapid error loops can be noisy; turn on
+    # once your tool set is stable.
+    tool_feedback_learning: bool = False
+
+    # Goal stack injection: read $PROJECTS_DIR/goals.jsonl on first turn
+    # and surface the top N open goals in the system prompt so the agent
+    # knows what's in flight across sessions. Off by default.
+    goals_inject: bool = False
+    goals_inject_limit: int = 5
 
 
 # ---- brain ------------------------------------------------------------------
@@ -322,6 +337,21 @@ class Brain:
                     "## Environment\n\n" + snap +
                     "\n\nUse this context to avoid exploratory tool calls."
                 )
+
+        # Goal stack injection (first turn only) — see mnemosyne_goals
+        if self.config.goals_inject and not self._env_snapshot_injected:
+            try:
+                import mnemosyne_goals as goals_mod
+                gs = goals_mod.GoalStack()
+                block = goals_mod.goals_system_block(
+                    gs.list_open(), limit=self.config.goals_inject_limit,
+                )
+                if block:
+                    system_parts.append(block)
+            except Exception:
+                pass
+
+        if not self._env_snapshot_injected:
             self._env_snapshot_injected = True
 
         if hits:
@@ -383,6 +413,31 @@ class Brain:
                     except Exception as e:
                         tool_result = {"error": f"{type(e).__name__}: {e}"}
                         status = "error"
+                    # Tool-feedback learning: on error, write an L1 hot
+                    # memory so future routing sees the failure mode.
+                    # Kept tiny — the memory becomes retrievable context
+                    # for next time without overfitting to one user prompt.
+                    if status == "error" and self.config.tool_feedback_learning:
+                        try:
+                            err_msg = (tool_result or {}).get("error", "")
+                            self.memory.write(
+                                content=(
+                                    f"Tool `{name}` failed with {err_msg!r} "
+                                    f"when called with args={args!r}. "
+                                    f"Consider an alternative or guard the call."
+                                ),
+                                source="tool_feedback",
+                                kind="failure_note",
+                                tier=mm.L1_HOT,
+                                metadata={
+                                    "tool": name,
+                                    "error": err_msg,
+                                    "args": args if isinstance(args, dict) else {},
+                                },
+                            )
+                            self._total_memory_writes += 1
+                        except Exception:
+                            pass  # learning must never break a turn
                     self._log(
                         "tool_call",
                         tool=name,
@@ -471,6 +526,7 @@ class Brain:
             personality=self.config.personality,
             shared_context=shared_context,
             telemetry=self.telemetry,
+            enable_evaluator=self.config.inner_dialogue_evaluator,
         )
         self._total_model_calls += result.total_model_calls
 

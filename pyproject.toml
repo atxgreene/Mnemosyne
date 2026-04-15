@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.1.0"
+version = "0.2.0"
 description = "Meta-Harness-aligned observability + evaluation substrate for local-first LLM agents"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -49,6 +49,11 @@ mnemosyne-memory       = "mnemosyne_memory:_main"
 mnemosyne-triage       = "mnemosyne_triage:_main"
 mnemosyne-proposer     = "mnemosyne_proposer:_main"
 mnemosyne-dreams       = "mnemosyne_dreams:_main"
+mnemosyne-apply        = "mnemosyne_apply:_main"
+mnemosyne-scengen      = "mnemosyne_scengen:_main"
+mnemosyne-goals        = "mnemosyne_goals:_main"
+mnemosyne-mcp          = "mnemosyne_mcp:_main"
+mnemosyne-serve        = "mnemosyne_serve:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -77,7 +82,14 @@ py-modules = [
     "mnemosyne_proposer",
     "mnemosyne_dreams",
     "mnemosyne_inner",
+    # v0.2.0 rigor pass: shippability surface
+    "mnemosyne_serve",
+    "mnemosyne_apply",
+    "mnemosyne_embeddings",
+    "mnemosyne_scengen",
+    "mnemosyne_goals",
+    "mnemosyne_mcp",
 ]
 
 [tool.setuptools.package-data]
-"*" = ["scenarios.example.jsonl"]
+"*" = ["scenarios.example.jsonl", "scenarios/*.jsonl"]

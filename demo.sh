@@ -45,7 +45,7 @@ printf 'Branch:      %s\n' "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || ech
 printf 'Python:      %s\n' "$(python3 --version)"
 
 # ==============================================================================
-head1 '1/14  pip install -e . into a fresh venv'
+head1 '1/17  pip install -e . into a fresh venv'
 # ==============================================================================
 python3 -m venv "$DEMO_VENV"
 "$DEMO_VENV/bin/pip" install --quiet --upgrade pip
@@ -67,7 +67,7 @@ print('  ✓ all 7 library surfaces import cleanly')
 "
 
 # ==============================================================================
-head1 '2/14  Model providers — 19 backends detected'
+head1 '2/17  Model providers — 19 backends detected'
 # ==============================================================================
 export PATH="$DEMO_VENV/bin:$PATH"
 export MNEMOSYNE_PROJECTS_DIR="$DEMO_PROJECTS"
@@ -79,13 +79,13 @@ head2 'mnemosyne-models current   (no auth configured → falls back)'
 mnemosyne-models current
 
 # ==============================================================================
-head1 '3/14  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)'
+head1 '3/17  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)'
 # ==============================================================================
 head2 'environment-snapshot  (human-readable markdown)'
 environment-snapshot --projects-dir "$DEMO_PROJECTS" 2>&1 | head -30
 
 # ==============================================================================
-head1 '4/14  Memory layer — SQLite+FTS5 with ICMS 3-tier'
+head1 '4/17  Memory layer — SQLite+FTS5 with ICMS 3-tier'
 # ==============================================================================
 MEM_DB="$DEMO_PROJECTS/memory.db"
 
@@ -105,7 +105,7 @@ head2 'Stats:'
 mnemosyne-memory --db "$MEM_DB" stats
 
 # ==============================================================================
-head1 '5/14  Identity lock — regardless of underlying model, agent says Mnemosyne'
+head1 '5/17  Identity lock — regardless of underlying model, agent says Mnemosyne'
 # ==============================================================================
 head2 'Testing enforce_identity() against 5 slip patterns + 3 legitimate uses'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -159,7 +159,7 @@ mem.close()
 PY
 
 # ==============================================================================
-head1 '6/14  Skills — agentskills.io-compatible registry + self-improvement'
+head1 '6/17  Skills — agentskills.io-compatible registry + self-improvement'
 # ==============================================================================
 "$DEMO_VENV/bin/python3" <<'PY'
 import os, tempfile
@@ -200,7 +200,7 @@ print(f'  Parsed back:  name={loaded.name}  learned={loaded.learned}')
 PY
 
 # ==============================================================================
-head1 '7/14  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT'
+head1 '7/17  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT'
 # ==============================================================================
 head2 'Running examples/sweep_demo.py (8-point sweep, fake harness, ~6 seconds)'
 "$DEMO_VENV/bin/python3" "$SCRIPT_DIR/examples/sweep_demo.py" --projects-dir "$DEMO_PROJECTS" 2>&1 | tail -12
@@ -216,14 +216,14 @@ mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" pareto \
   --axes accuracy,latency_ms_avg --directions max,min --plot 2>&1 | head -30
 
 # ==============================================================================
-head1 '8/14  Aggregate statistics — per-tool call counts, latency percentiles'
+head1 '8/17  Aggregate statistics — per-tool call counts, latency percentiles'
 # ==============================================================================
 LATEST=$(mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" list --limit 1 | head -1 | awk '{print $1}')
 head2 "aggregate for $LATEST"
 mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" aggregate "$LATEST"
 
 # ==============================================================================
-head1 '9/14  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)'
+head1 '9/17  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)'
 # ==============================================================================
 head2 'mnemosyne-triage scan --window-days 30  (reads events.jsonl from our demo runs)'
 mnemosyne-triage --projects-dir "$DEMO_PROJECTS" scan --window-days 30 --top-n 5
@@ -235,7 +235,7 @@ head2 'First 20 lines of the report:'
 head -20 "$DEMO_PROJECTS"/health/*.md 2>/dev/null | sed 's/^/  /'
 
 # ==============================================================================
-head1 '10/14  Meta-Harness proposer — triage → proposals (rule-based v1)'
+head1 '10/17  Meta-Harness proposer — triage → proposals (rule-based v1)'
 # ==============================================================================
 head2 'Seed an identity-slip event so the proposer has something to react to'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -261,7 +261,7 @@ PROP=$(ls -1t "$DEMO_PROJECTS"/proposals/PROP-*.md 2>/dev/null | head -1)
 [ -n "$PROP" ] && head -25 "$PROP" | sed 's/^/  /'
 
 # ==============================================================================
-head1 '11/14  Dream consolidation — offline pattern extraction from L3 cold'
+head1 '11/17  Dream consolidation — offline pattern extraction from L3 cold'
 # ==============================================================================
 head2 'Seed 12 related L3 memories (user-preference pattern)'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -302,7 +302,7 @@ head2 'Dream report JSON:'
 ls "$DEMO_PROJECTS/dreams/" 2>/dev/null | sed 's/^/  /'
 
 # ==============================================================================
-head1 '12/14  Inner dialogue — Planner → Critic → Doer on tagged turns'
+head1 '12/17  Inner dialogue — Planner → Critic → Doer on tagged turns'
 # ==============================================================================
 "$DEMO_VENV/bin/python3" <<'PY'
 import os
@@ -353,12 +353,104 @@ store.close()
 PY
 
 # ==============================================================================
-head1 '13/14  Live dashboard (single frame via --once --plain)'
+head1 '13/17  Goal stack — persistent TODOs across sessions'
+# ==============================================================================
+head2 'Seed two goals via the CLI'
+mnemosyne-goals --projects-dir "$DEMO_PROJECTS" add "ship v0.2.0 release notes" --priority 1 --tags "release,docs" | sed 's/^/  /'
+mnemosyne-goals --projects-dir "$DEMO_PROJECTS" add "review Peter Pang article for loop ideas" --priority 3 --tags "reading" | sed 's/^/  /'
+
+head2 'List open goals (priority-sorted)'
+mnemosyne-goals --projects-dir "$DEMO_PROJECTS" list | sed 's/^/  /'
+
+head2 'Brain with goals_inject=True surfaces them in the first-turn system prompt'
+"$DEMO_VENV/bin/python3" <<'PY'
+import os
+from pathlib import Path
+from mnemosyne_brain import Brain, BrainConfig
+from mnemosyne_memory import MemoryStore
+from mnemosyne_skills import SkillRegistry
+
+captured = {}
+def mock_chat(messages, **kw):
+    captured['system'] = next((m['content'] for m in messages if m['role'] == 'system'), '')
+    return {'status': 'ok', 'text': 'noted the open goals', 'tool_calls': []}
+
+pd = Path(os.environ['MNEMOSYNE_PROJECTS_DIR'])
+store = MemoryStore(path=pd / 'goals-demo.db')
+cfg = BrainConfig(adapt_to_context=False, inject_env_snapshot=False, goals_inject=True)
+brain = Brain(config=cfg, memory=store, skills=SkillRegistry(), chat_fn=mock_chat)
+brain.turn('what should we work on today?')
+for line in captured.get('system', '').splitlines():
+    if 'goals' in line.lower() or line.startswith('- (P'):
+        print(f'  {line}')
+store.close()
+PY
+
+# ==============================================================================
+head1 '14/17  Apply-agent — closes the Meta-Harness loop'
+# ==============================================================================
+head2 'Mark one identity proposal as accepted, then run mnemosyne-apply'
+PROP=$(ls -1t "$DEMO_PROJECTS"/proposals/PROP-*identity*.md 2>/dev/null | head -1)
+if [ -n "$PROP" ]; then
+  python3 -c "
+import sys
+from pathlib import Path
+p = Path('$PROP')
+text = p.read_text()
+p.write_text(text.replace('status: pending', 'status: accepted'))
+print(f'  marked accepted: {p.name}')
+"
+  mnemosyne-apply --projects-dir "$DEMO_PROJECTS" | sed 's/^/  /'
+  head2 'Proposal status after apply:'
+  head -10 "$PROP" | sed 's/^/  /'
+else
+  echo "  (no identity proposal to apply — skipping)"
+fi
+
+# ==============================================================================
+head1 '15/17  MCP bridge — Mnemosyne skills exposed as Model Context Protocol tools'
+# ==============================================================================
+head2 'mnemosyne-mcp serve reads JSON-RPC from stdin; we drive it inline'
+"$DEMO_VENV/bin/python3" <<'PY'
+import io, json, sys
+from mnemosyne_skills import SkillRegistry
+import mnemosyne_mcp as mcp
+
+reg = SkillRegistry()
+
+@reg.register_python('echo', 'return the input unchanged',
+                     [{'name': 'text', 'type': 'string', 'required': True}])
+def echo(text: str) -> dict:
+    return {'echoed': text}
+
+stdin = io.StringIO(
+    json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}}) + '\n' +
+    json.dumps({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'}) + '\n' +
+    json.dumps({'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call',
+                'params': {'name': 'echo', 'arguments': {'text': 'hi from MCP'}}}) + '\n'
+)
+out = io.StringIO()
+orig = sys.stdin, sys.stdout
+sys.stdin, sys.stdout = stdin, out
+try:
+    mcp.serve_stdio(registry=reg)
+finally:
+    sys.stdin, sys.stdout = orig
+
+for line in out.getvalue().splitlines():
+    r = json.loads(line)
+    if 'result' in r:
+        snippet = json.dumps(r['result'])[:120]
+        print(f'  id={r["id"]:<2} result: {snippet}...' if len(snippet) >= 120 else f'  id={r["id"]:<2} result: {snippet}')
+PY
+
+# ==============================================================================
+head1 '16/17  Live dashboard (single frame via --once --plain)'
 # ==============================================================================
 bash "$SCRIPT_DIR/mnemosyne-dashboard.sh" --once --plain
 
 # ==============================================================================
-head1 '14/14  Test suite'
+head1 '17/17  Test suite'
 # ==============================================================================
 head2 'bash test-harness.sh (integration)'
 bash "$SCRIPT_DIR/test-harness.sh" 2>&1 | tail -4
@@ -370,9 +462,10 @@ head2 'python3 tests/test_all.py (unit)'
 head1 'Demo complete.'
 # ==============================================================================
 printf '\n'
-printf 'All 14 sections exercised. Identity lock holds across slip attempts.\n'
-printf 'Triage clusters real events, proposer writes reviewable markdown,\n'
-printf 'dreams compress L3 cold memories, inner dialogue fires on hard turns.\n'
+printf 'All 17 sections exercised. Identity lock holds across slip attempts.\n'
+printf 'Triage → proposer → apply closes the Meta-Harness loop end-to-end.\n'
+printf 'Dreams compress L3 cold memories; inner dialogue fires on hard turns.\n'
+printf 'Goal stack persists across sessions; MCP bridge exposes skills.\n'
 printf 'Full pipeline produces real experiments in the fake PROJECTS_DIR and\n'
 printf 'the CLI tools read them back without sys.path shims. All tests pass.\n'
 printf '\n'

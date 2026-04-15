@@ -652,6 +652,94 @@ def _ascii_scatter(
     return "\n".join(lines)
 
 
+# ---- cost: token-usage → USD rollup ----------------------------------------
+
+def cmd_cost(args: argparse.Namespace) -> int:
+    """Estimate USD cost from `model_call` events in one run or all runs.
+
+    Reads `usage` from each model_call event and prices it using
+    `mnemosyne_models.DEFAULT_PRICING`. Unknown models get zero cost
+    unless --price-override is supplied.
+    """
+    import mnemosyne_models as mm_models
+
+    pd = Path(args.projects_dir) if args.projects_dir else None
+    override: dict[str, float] | None = None
+    if args.price_override:
+        try:
+            override = json.loads(args.price_override)
+        except json.JSONDecodeError as e:
+            print(f"cost: invalid --price-override JSON: {e}", file=sys.stderr)
+            return 2
+
+    if args.run_id:
+        run_ids = [args.run_id]
+    else:
+        run_ids = [r["run_id"] for r in ht.list_runs(pd)]
+
+    totals: dict[str, dict[str, float]] = {}
+    grand_total = 0.0
+    for rid in run_ids:
+        try:
+            rd = ht.run_path(rid, pd)
+        except Exception:
+            continue
+        events_file = rd / "events.jsonl"
+        if not events_file.exists():
+            continue
+        with events_file.open(encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("event_type") != "model_call":
+                    continue
+                result = e.get("result") or {}
+                usage = result.get("usage")
+                args_ = e.get("args") or {}
+                model = args_.get("model") or ""
+                provider = args_.get("provider") or ""
+                key = f"{provider}:{model}" if provider else model
+                c = mm_models.cost_for(model, usage, price_override=override)
+                if c["total_usd"] <= 0 and not override:
+                    continue
+                slot = totals.setdefault(key, {
+                    "prompt_usd": 0.0, "completion_usd": 0.0, "total_usd": 0.0,
+                    "prompt_tokens": 0, "completion_tokens": 0, "calls": 0,
+                })
+                slot["prompt_usd"] += c["prompt_usd"]
+                slot["completion_usd"] += c["completion_usd"]
+                slot["total_usd"] += c["total_usd"]
+                slot["prompt_tokens"] += (usage or {}).get("prompt_tokens", 0)
+                slot["completion_tokens"] += (usage or {}).get("completion_tokens", 0)
+                slot["calls"] += 1
+                grand_total += c["total_usd"]
+
+    if args.json:
+        _emit_json({
+            "scope": args.run_id or "all_runs",
+            "grand_total_usd": round(grand_total, 6),
+            "by_model": totals,
+        })
+        return 0
+
+    if not totals:
+        print("cost: no priced model_call events found "
+              "(local models are $0; pass --price-override for unknown models)")
+        return 0
+
+    print(f"{'model':<40} {'calls':>6} {'in_toks':>10} {'out_toks':>10} "
+          f"{'total_usd':>10}")
+    for key, v in sorted(totals.items(), key=lambda kv: -kv[1]["total_usd"]):
+        print(f"  {key:<38} {v['calls']:>6} "
+              f"{int(v['prompt_tokens']):>10} {int(v['completion_tokens']):>10} "
+              f"${v['total_usd']:>9.4f}")
+    print(f"  {'─' * 76}")
+    print(f"  {'TOTAL':<38} {'':>6} {'':>10} {'':>10} ${grand_total:>9.4f}")
+    return 0
+
+
 # ---- browse: interactive TUI ------------------------------------------------
 
 def cmd_browse(args: argparse.Namespace) -> int:
@@ -961,6 +1049,13 @@ def build_parser() -> argparse.ArgumentParser:
                              "(call count, success rate, latency p50/p95/p99)")
     ap.add_argument("run_id")
 
+    cp = sub.add_parser("cost", parents=[common],
+                        help="estimate USD cost from model_call usage tokens")
+    cp.add_argument("run_id", nargs="?",
+                    help="run_id (omit to roll up across all runs)")
+    cp.add_argument("--price-override", help="JSON string: "
+                    "{\"prompt\": 2.5, \"completion\": 10.0} for unknown models")
+
     # Interactive browser — uses whiptail TUI when available.
     sub.add_parser("browse", parents=[common],
                    help="interactive run browser (whiptail TUI, text fallback)")
@@ -979,6 +1074,7 @@ def main(argv: list[str] | None = None) -> int:
         "diff": cmd_diff,
         "events": cmd_events,
         "aggregate": cmd_aggregate,
+        "cost": cmd_cost,
         "browse": cmd_browse,
     }
     return handlers[args.cmd](args)

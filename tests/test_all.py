@@ -31,14 +31,19 @@ sys.path.insert(0, str(_REPO))
 
 import harness_sweep as sweep  # noqa: E402
 import harness_telemetry as ht  # noqa: E402
+import mnemosyne_apply as apply_mod  # noqa: E402
 import mnemosyne_brain as br  # noqa: E402
 import mnemosyne_dreams as dreams  # noqa: E402
+import mnemosyne_embeddings as emb  # noqa: E402
 import mnemosyne_experiments as mex  # noqa: E402  (direct import after rename)
+import mnemosyne_goals as goals_mod  # noqa: E402
 import mnemosyne_identity as mid  # noqa: E402
 import mnemosyne_inner as inner  # noqa: E402
+import mnemosyne_mcp as mcp  # noqa: E402
 import mnemosyne_memory as mm  # noqa: E402
 import mnemosyne_models as mdls  # noqa: E402
 import mnemosyne_proposer as proposer  # noqa: E402
+import mnemosyne_scengen as scengen  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
 import mnemosyne_triage as tri  # noqa: E402
 import scenario_runner as sr  # noqa: E402
@@ -1901,6 +1906,457 @@ def _():
         # Only the turn memory should be written — no dream abstracts
         assert after == before + 1, f"unexpected dream: {before}->{after}"
         store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_models: rate limiter + cost pricing + stream parser bits
+# =============================================================================
+
+@test("models: rate limiter blocks until token available")
+def _():
+    lim = mdls.RateLimiter(default_rps=50.0, burst=2)
+    t0 = time.monotonic()
+    for _ in range(5):
+        lim.acquire("fake-provider")
+    elapsed = time.monotonic() - t0
+    # 5 tokens at 50 rps with burst=2: first 2 are free, then 3 at 20ms each
+    # ≈ 60ms. Allow plenty of slack for CI.
+    assert 0.04 <= elapsed <= 0.5, f"elapsed={elapsed}"
+
+
+@test("models: rate limiter raises on timeout")
+def _():
+    lim = mdls.RateLimiter(default_rps=0.1, burst=1)   # 1 token / 10s
+    lim.acquire("fake")   # consume the burst
+    raised = False
+    try:
+        lim.acquire("fake", timeout=0.2)
+    except TimeoutError:
+        raised = True
+    assert raised
+
+
+@test("models: cost_for gpt-4o with canonical usage")
+def _():
+    c = mdls.cost_for("gpt-4o",
+                       {"prompt_tokens": 1_000_000,
+                        "completion_tokens": 500_000})
+    assert round(c["prompt_usd"], 2) == 2.50
+    assert round(c["completion_usd"], 2) == 5.00
+    assert c["matched"] == "gpt-4o"
+
+
+@test("models: cost_for local Ollama model returns zero")
+def _():
+    c = mdls.cost_for("qwen3.5:9b", {"prompt_tokens": 1000, "completion_tokens": 500})
+    assert c["total_usd"] == 0.0, c
+
+
+@test("models: cost_for unknown model returns zero without override")
+def _():
+    c = mdls.cost_for("some-new-model-2027",
+                       {"prompt_tokens": 100, "completion_tokens": 50})
+    assert c["total_usd"] == 0.0
+
+
+@test("models: cost_for uses price_override for unknown models")
+def _():
+    c = mdls.cost_for("some-new-model-2027",
+                       {"prompt_tokens": 1_000_000, "completion_tokens": 500_000},
+                       price_override={"prompt": 1.0, "completion": 2.0})
+    assert round(c["total_usd"], 2) == 2.00    # 1.0 + 1.0
+
+
+# =============================================================================
+#  mnemosyne_goals
+# =============================================================================
+
+@test("goals: add + list_open round-trip")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        gs = goals_mod.GoalStack(projects_dir=pd)
+        g = gs.add("finish the demo", priority=2, tags=["demo"])
+        assert g.id == 1
+        assert g.status == "open"
+        opens = gs.list_open()
+        assert len(opens) == 1
+        assert opens[0].text == "finish the demo"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("goals: resolve moves goal out of list_open")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        gs = goals_mod.GoalStack(projects_dir=pd)
+        g1 = gs.add("goal one")
+        g2 = gs.add("goal two")
+        gs.resolve(g1.id, notes="done")
+        opens = gs.list_open()
+        assert [g.id for g in opens] == [g2.id]
+        resolved = gs.get(g1.id)
+        assert resolved is not None and resolved.status == "resolved"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("goals: system_block lists top-priority first")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        gs = goals_mod.GoalStack(projects_dir=pd)
+        gs.add("low priority", priority=5)
+        high = gs.add("urgent thing", priority=1)
+        block = goals_mod.goals_system_block(gs.list_open(), limit=5)
+        # High-priority goal text should appear before the low-priority one
+        assert block.index("urgent thing") < block.index("low priority")
+        assert f"#{high.id}" in block
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_embeddings
+# =============================================================================
+
+@test("embeddings: hashed-bow deterministic + similar texts cluster")
+def _():
+    e = emb.HashedBowEmbedder(dim=128)
+    v1 = e.embed("dark mode in vscode editor")
+    v2 = e.embed("dark mode in terminal apps")
+    v3 = e.embed("weather forecast tomorrow rain")
+    sim_close = emb.cosine(v1, v2)
+    sim_far = emb.cosine(v1, v3)
+    assert sim_close > sim_far, f"close={sim_close}, far={sim_far}"
+    # Deterministic: same input gives same vector
+    assert e.embed("dark mode in vscode editor") == v1
+
+
+@test("embeddings: cosine boundary cases")
+def _():
+    assert emb.cosine([], []) == 0.0
+    assert emb.cosine([0.0, 0.0], [1.0, 0.0]) == 0.0
+    assert abs(emb.cosine([1.0, 0.0], [1.0, 0.0]) - 1.0) < 1e-9
+
+
+@test("embeddings: cluster_by_embedding groups similar memories")
+def _():
+    mems = [
+        {"id": 1, "content": "user prefers dark mode in editor"},
+        {"id": 2, "content": "user uses dark mode in terminal"},
+        {"id": 3, "content": "user likes dark theme at night"},
+        {"id": 4, "content": "weather forecast shows rain"},
+        {"id": 5, "content": "weather alert rain warning"},
+        {"id": 6, "content": "weather advisory stormy today"},
+    ]
+    e = emb.HashedBowEmbedder(dim=256)
+    clusters = emb.cluster_by_embedding(
+        mems, e, similarity_threshold=0.15, min_cluster_size=2,
+    )
+    # Expect at least one cluster and every cluster to have >= 2 members
+    assert len(clusters) >= 1
+    for c in clusters:
+        assert c["size"] >= 2
+
+
+# =============================================================================
+#  mnemosyne_apply
+# =============================================================================
+
+@test("apply: skipped when proposal status != accepted")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        proposals = pd / "proposals"
+        proposals.mkdir(parents=True)
+        prop = proposals / "PROP-0001-test.md"
+        prop.write_text(
+            "---\nid: PROP-0001\nstatus: pending\ncategory: identity\n---\n"
+            "# test proposal\n",
+            encoding="utf-8",
+        )
+        r = apply_mod.apply_proposal(prop)
+        assert r.status == "skipped"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("apply: identity-category handler runs against identity scenarios")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        proposals = pd / "proposals"
+        proposals.mkdir(parents=True)
+        prop = proposals / "PROP-0001-id.md"
+        prop.write_text(
+            "---\nid: PROP-0001\nstatus: accepted\ncategory: identity\n---\n"
+            "# test identity\n",
+            encoding="utf-8",
+        )
+        r = apply_mod.apply_proposal(prop)
+        assert r.status == "applied", r
+        assert "slips_caught" in r.details
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("apply: tool category is marked not-automatable")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        proposals = pd / "proposals"
+        proposals.mkdir(parents=True)
+        prop = proposals / "PROP-0001-tool.md"
+        prop.write_text(
+            "---\nid: PROP-0001\nstatus: accepted\ncategory: tool\n---\n"
+            "# test tool\n",
+            encoding="utf-8",
+        )
+        r = apply_mod.apply_proposal(prop)
+        assert r.status == "not-automatable"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("apply: apply_all_accepted walks the proposals dir")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        proposals = pd / "proposals"
+        proposals.mkdir(parents=True)
+        for i, status in enumerate(["pending", "accepted", "rejected"]):
+            (proposals / f"PROP-000{i+1}-t.md").write_text(
+                f"---\nid: PROP-000{i+1}\nstatus: {status}\ncategory: config\n---\n# {status}\n",
+                encoding="utf-8",
+            )
+        results = apply_mod.apply_all_accepted(projects_dir=pd)
+        # Only the one with status=accepted should have been processed
+        assert len(results) == 1, [r.__dict__ for r in results]
+        assert results[0].proposal_id == "PROP-0002"
+        assert (pd / "apply_history.jsonl").exists()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_scengen
+# =============================================================================
+
+@test("scengen: candidate_to_scenario extracts salient tokens")
+def _():
+    c = scengen.Candidate(
+        run_id="r1", turn_number=1, timestamp_utc="2026-04-15T00:00:00Z",
+        user_message="What is the capital of France?",
+        response_text="Paris is the capital of France. "
+                        "Paris is also the largest city in France.",
+    )
+    s = scengen.candidate_to_scenario(c, n_asserts=2)
+    assert s["prompt"] == "What is the capital of France?"
+    assert "auto-generated" in s["tags"]
+    # Paris should be a salient token (4+ chars, repeated)
+    assert "paris" in s["expected_contains"]
+
+
+@test("scengen: generate returns empty when there are no runs")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        out = scengen.generate(projects_dir=pd)
+        assert out["scenarios"] == 0
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_mcp (protocol-level; no subprocess spawning in tests)
+# =============================================================================
+
+@test("mcp: serve_stdio tools/list returns registered skills")
+def _():
+    import io
+
+    reg = sk.SkillRegistry()
+
+    @reg.register_python("ping", "respond with pong",
+                           [{"name": "x", "type": "string", "required": True,
+                             "description": "anything"}])
+    def _ping(x: str) -> dict:
+        return {"pong": x}
+
+    # Drive the server via piped stdin/stdout
+    stdin = io.StringIO()
+    stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1,
+                              "method": "initialize", "params": {}}) + "\n")
+    stdin.write(json.dumps({"jsonrpc": "2.0", "id": 2,
+                              "method": "tools/list"}) + "\n")
+    stdin.write(json.dumps({"jsonrpc": "2.0", "id": 3,
+                              "method": "tools/call",
+                              "params": {"name": "ping",
+                                         "arguments": {"x": "hello"}}}) + "\n")
+    stdin.seek(0)
+
+    out = io.StringIO()
+    orig_stdin, orig_stdout = sys.stdin, sys.stdout
+    try:
+        sys.stdin, sys.stdout = stdin, out
+        mcp.serve_stdio(registry=reg)
+    finally:
+        sys.stdin, sys.stdout = orig_stdin, orig_stdout
+
+    out.seek(0)
+    responses = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    assert len(responses) == 3, responses
+    init, tlist, tcall = responses
+    assert init["result"]["serverInfo"]["name"] == "mnemosyne"
+    tool_names = {t["name"] for t in tlist["result"]["tools"]}
+    assert "ping" in tool_names
+    # tools/call returns MCP content-wrapped output
+    content = tcall["result"]["content"]
+    assert content[0]["type"] == "text"
+    assert "pong" in content[0]["text"]
+
+
+# =============================================================================
+#  inner: Evaluator persona
+# =============================================================================
+
+@test("inner: evaluator fires when enable_evaluator=True")
+def _():
+    personas_seen: list[str] = []
+
+    def fake_chat(messages, **kw):
+        sys_text = next((m["content"] for m in messages if m["role"] == "system"), "")
+        if "Role: Planner" in sys_text:
+            personas_seen.append("planner")
+            return {"status": "ok", "text": "plan text", "tool_calls": []}
+        if "Role: Critic" in sys_text:
+            personas_seen.append("critic")
+            return {"status": "ok", "text": "accept", "tool_calls": []}
+        if "Role: Doer" in sys_text:
+            personas_seen.append("doer")
+            return {"status": "ok", "text": "final answer", "tool_calls": []}
+        if "Role: Evaluator" in sys_text:
+            personas_seen.append("evaluator")
+            return {"status": "ok",
+                    "text": "### Score\n- plan_coverage: 9\n\n### Verdict\n- (accept)",
+                    "tool_calls": []}
+        return {"status": "ok", "text": "", "tool_calls": []}
+
+    result = inner.deliberate(
+        user_message="Plan something.",
+        chat_fn=fake_chat,
+        backend=None,
+        enable_evaluator=True,
+    )
+    assert personas_seen == ["planner", "critic", "doer", "evaluator"]
+    assert result.evaluator is not None
+    assert result.evaluator_verdict == "accept"
+
+
+@test("inner: evaluator verdict=revise is detected")
+def _():
+    def fake_chat(messages, **kw):
+        sys_text = next((m["content"] for m in messages if m["role"] == "system"), "")
+        if "Role: Evaluator" in sys_text:
+            return {"status": "ok",
+                    "text": "### Verdict\n- (revise): the plan skipped backup",
+                    "tool_calls": []}
+        return {"status": "ok", "text": "x", "tool_calls": []}
+
+    result = inner.deliberate(
+        user_message="q",
+        chat_fn=fake_chat,
+        backend=None,
+        enable_evaluator=True,
+    )
+    assert result.evaluator_verdict == "revise"
+
+
+# =============================================================================
+#  brain: tool-feedback learning + goals injection
+# =============================================================================
+
+@test("brain: tool-feedback writes L1 failure_note on tool error")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        reg = sk.SkillRegistry()
+
+        @reg.register_python("bad_tool", "always raises",
+                               [{"name": "x", "type": "string", "required": True}])
+        def _bad(x: str) -> dict:
+            raise RuntimeError("boom")
+
+        # Mock chat_fn that calls the bad tool once, then returns plain text
+        calls = {"n": 0}
+
+        def fake_chat(messages, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"status": "ok", "text": "calling tool",
+                        "tool_calls": [{"id": "t1", "name": "bad_tool",
+                                          "arguments": {"x": "hi"}}]}
+            return {"status": "ok", "text": "final answer",
+                    "tool_calls": []}
+
+        store = mm.MemoryStore(path=pd / "memory.db")
+        cfg = br.BrainConfig(
+            adapt_to_context=False, inject_env_snapshot=False,
+            tool_feedback_learning=True,
+        )
+        brain = br.Brain(config=cfg, memory=store, skills=reg, chat_fn=fake_chat)
+        brain.turn("use the tool please")
+        # Expect a failure_note L1 memory
+        rows = store._conn.execute(
+            "SELECT content FROM memories WHERE kind = 'failure_note'"
+        ).fetchall()
+        assert len(rows) >= 1, rows
+        assert "bad_tool" in rows[0][0]
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: goals injection surfaces top goals in first-turn system prompt")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        # Seed a goal at the default location (the brain reads GoalStack())
+        import os as _os
+        saved = _os.environ.get("MNEMOSYNE_PROJECTS_DIR")
+        _os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        try:
+            gs = goals_mod.GoalStack(projects_dir=pd)
+            gs.add("ship the v0.2.0 release", priority=1, tags=["release"])
+
+            seen_system: list[str] = []
+
+            def fake_chat(messages, **kw):
+                seen_system.append(next(
+                    (m["content"] for m in messages if m["role"] == "system"),
+                    "",
+                ))
+                return {"status": "ok", "text": "noted", "tool_calls": []}
+
+            store = mm.MemoryStore(path=pd / "memory.db")
+            cfg = br.BrainConfig(
+                adapt_to_context=False, inject_env_snapshot=False,
+                goals_inject=True,
+            )
+            brain = br.Brain(config=cfg, memory=store, skills=sk.SkillRegistry(),
+                             chat_fn=fake_chat)
+            brain.turn("hello")
+            assert "ship the v0.2.0 release" in seen_system[0], seen_system[0]
+            store.close()
+        finally:
+            if saved is None:
+                _os.environ.pop("MNEMOSYNE_PROJECTS_DIR", None)
+            else:
+                _os.environ["MNEMOSYNE_PROJECTS_DIR"] = saved
     finally:
         shutil.rmtree(pd)
 

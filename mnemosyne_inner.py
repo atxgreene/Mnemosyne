@@ -134,7 +134,7 @@ alongside the original plan.
 """
 
 DOER_SYSTEM = """\
-## Role: Doer (inner-dialogue phase 3 of 3)
+## Role: Doer (inner-dialogue phase 3 of 4)
 
 You are the final responder. You receive:
   - the user's original message
@@ -151,6 +151,35 @@ Write directly to the user. Do not mention the inner dialogue. Do not
 include meta-commentary about personas or phases.
 """
 
+EVALUATOR_SYSTEM = """\
+## Role: Evaluator (inner-dialogue phase 4 of 4)
+
+You are the evaluator. You receive:
+  - the original user message
+  - the Plan produced by Planner
+  - the Critique produced by Critic
+  - the final answer produced by Doer
+
+Your job: score whether the Doer's answer satisfies the Plan and
+addresses the Critic's concerns. Output a rigid structured block:
+
+### Score
+- plan_coverage: 0-10   (how well did the answer execute the Plan?)
+- critic_resolution: 0-10  (how well did it address Critic concerns?)
+- user_fit: 0-10         (how well does it answer what the user actually asked?)
+
+### Verdict
+- (accept) — the answer is good, deliver as-is.
+- (revise) — the answer has issues. List what would improve it.
+
+### Notes
+- (one or two sentences of rationale)
+
+Keep it terse. Do not address the user. The Brain reads your verdict
+to decide whether to ship the Doer's answer or fall back to a
+revision pass.
+"""
+
 
 @dataclass
 class PersonaOutput:
@@ -165,7 +194,9 @@ class DeliberationResult:
     planner: PersonaOutput | None = None
     critic: PersonaOutput | None = None
     doer: PersonaOutput | None = None
+    evaluator: PersonaOutput | None = None
     total_model_calls: int = 0
+    evaluator_verdict: str | None = None    # "accept" | "revise" | None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -219,6 +250,7 @@ def deliberate(
     temperature: float | None = 0.3,
     max_tokens: int | None = 600,
     enable_critic: bool = True,
+    enable_evaluator: bool = False,
 ) -> DeliberationResult:
     """Run the Planner → Critic → Doer loop and return the Doer's answer.
 
@@ -334,9 +366,45 @@ def deliberate(
     total_calls += 1
     doer_out = PersonaOutput(name="doer", text=doer_text, model_calls=1)
 
+    # Phase 4 — Evaluator (optional)
+    evaluator_out: PersonaOutput | None = None
+    verdict: str | None = None
+    if enable_evaluator and doer_text.strip():
+        eval_input_parts = [
+            f"Original user message:\n{user_message}",
+            f"Plan:\n{planner_text or '(none)'}",
+        ]
+        if critic_out and critic_out.text.strip():
+            eval_input_parts.append(f"Critique:\n{critic_out.text}")
+        eval_input_parts.append(f"Final answer from Doer:\n{doer_text}")
+        eval_msgs: list[dict[str, Any]] = [
+            {"role": "system", "content": build_system(EVALUATOR_SYSTEM)},
+            {"role": "user", "content": "\n\n".join(eval_input_parts)},
+        ]
+        _log(telemetry, "persona_call", persona="evaluator",
+             metadata={"answer_len": len(doer_text)})
+        eval_text = _chat_once(
+            chat_fn, eval_msgs,
+            backend=backend, telemetry=telemetry,
+            temperature=temperature, max_tokens=max_tokens,
+        )
+        eval_text = _apply_identity_lock(eval_text, model)
+        total_calls += 1
+        evaluator_out = PersonaOutput(name="evaluator", text=eval_text, model_calls=1)
+
+        low = eval_text.lower()
+        if "(accept)" in low or "\naccept" in low:
+            verdict = "accept"
+        elif "(revise)" in low or "\nrevise" in low:
+            verdict = "revise"
+        else:
+            verdict = None
+
     _log(telemetry, "inner_dialogue_done",
          metadata={"total_calls": total_calls,
                     "critic_used": enable_critic,
+                    "evaluator_used": enable_evaluator,
+                    "evaluator_verdict": verdict,
                     "answer_len": len(doer_text)})
 
     return DeliberationResult(
@@ -344,9 +412,12 @@ def deliberate(
         planner=planner_out,
         critic=critic_out,
         doer=doer_out,
+        evaluator=evaluator_out,
+        evaluator_verdict=verdict,
         total_model_calls=total_calls,
         metadata={
             "used_critic": enable_critic,
+            "used_evaluator": enable_evaluator,
             "model": model,
         },
     )
