@@ -12,8 +12,8 @@ Every other module imports from here instead of reimplementing.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-
 
 
 def default_projects_dir() -> Path:
@@ -22,6 +22,22 @@ def default_projects_dir() -> Path:
     if raw:
         return Path(raw).expanduser().resolve()
     return (Path.home() / "projects" / "mnemosyne").resolve()
+
+
+# ---- time helpers -----------------------------------------------------------
+
+def utcnow_iso() -> str:
+    """UTC ISO 8601 timestamp with microseconds + Z suffix.
+
+    Single source of truth for every module that needs a timestamp. Nine
+    modules used to define this inline; now they import from here.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def utcnow_slug() -> str:
+    """Compact UTC timestamp suitable for directory/file slugs."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def default_ollama_host() -> str:

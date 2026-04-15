@@ -99,8 +99,11 @@ will being not can this that about into onto also same more your been have
 """.split())
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+try:
+    from mnemosyne_config import utcnow_iso as _utcnow
+except ImportError:  # pragma: no cover
+    def _utcnow() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _tokenize(text: str) -> list[str]:

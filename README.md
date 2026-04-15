@@ -2,12 +2,15 @@
 
 **A local-first, observable, identity-stable agent framework. Zero runtime deps. Stdlib only.**
 
+![demo](docs/demo.gif)
+
 One sentence: Mnemosyne is the substrate that makes local-first agent research cheap — ICMS 3-tier memory, 19 model backends, a Meta-Harness-aligned observability loop, and a 4-layer identity lock that holds whether the model inside is Qwen, Claude, GPT-4, or Gemini.
 
 ```sh
 git clone https://github.com/atxgreene/sturdy-doodle.git && cd sturdy-doodle
 pip install -e .
-./demo.sh                                  # 16-section end-to-end walkthrough, no network
+./demo.sh                                  # 18-section end-to-end walkthrough, no network
+./demo-quick.sh                            # 45-second version (what the GIF shows)
 ```
 
 ## Quickstart (10 lines)

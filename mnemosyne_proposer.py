@@ -151,8 +151,11 @@ class Proposal:
 
 # ---- rule engine -----------------------------------------------------------
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+try:
+    from mnemosyne_config import utcnow_iso as _utcnow
+except ImportError:  # pragma: no cover
+    def _utcnow() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _next_proposal_id(proposals_dir: Path) -> str:

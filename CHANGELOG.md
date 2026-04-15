@@ -4,6 +4,29 @@ All notable changes to the Mnemosyne harness deployment repo. The format is loos
 
 ## [0.2.0] — 2026-04-15 — v1.2 rigor pass + architectural primitives
 
+### v1.2.2 — consolidation pass + GIF demo
+
+Cleanup + deliverable improvements.
+
+- **Shared helpers consolidated.** `_utcnow` was defined inline in 9
+  modules, `_default_projects_dir` in 8. Both now live canonically in
+  `mnemosyne_config.py` (`utcnow_iso`, `utcnow_slug`,
+  `default_projects_dir`). Each module now imports from there with a
+  small standalone-file fallback (preserves the copy-paste-a-single-
+  file property of the framework). Net: ~80 lines of dead duplication
+  removed.
+- **`demo-quick.sh`** — 45-second screen-recordable walkthrough (5
+  sections: identity lock, ICMS memory, triage → proposer, training
+  export, tests + pyflakes). Feeds the GIF without scrolling.
+- **`docs/demo.gif`** — 121K GIF rendered via asciinema + agg 1.7.0.
+  Embedded at the top of README.md so the repo page shows the demo
+  inline.
+- **`docs/demo.cast`** — the raw asciinema cast. Keeps the source
+  alongside the render so both can be regenerated from one recording
+  session.
+
+Tests: 156 → 156 green (same count, just cleaner code).
+
 ### v1.2.1 — training bridge (telemetry → LoRA → LM Studio/Ollama)
 
 New module + five-subcommand CLI closes the Hermes / Meta-Harness loop

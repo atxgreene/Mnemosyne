@@ -80,15 +80,17 @@ with within without would your yours into this that
 """.split())
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+try:
+    from mnemosyne_config import utcnow_slug as _utcnow
+except ImportError:  # pragma: no cover
+    def _utcnow() -> str:
+        return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _default_projects_dir() -> Path:
-    try:
-        from mnemosyne_config import default_projects_dir
-        return default_projects_dir()
-    except ImportError:
+try:
+    from mnemosyne_config import default_projects_dir as _default_projects_dir
+except ImportError:  # pragma: no cover — standalone-file fallback
+    def _default_projects_dir() -> Path:
         raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
         return Path(raw).expanduser() if raw else (
             Path.home() / "projects" / "mnemosyne"

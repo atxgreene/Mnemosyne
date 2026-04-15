@@ -103,8 +103,11 @@ L3_COLD = 3
 _TIER_NAMES = {L1_HOT: "L1_hot", L2_WARM: "L2_warm", L3_COLD: "L3_cold"}
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+try:
+    from mnemosyne_config import utcnow_iso as _utcnow
+except ImportError:  # pragma: no cover
+    def _utcnow() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _default_memory_path() -> Path:

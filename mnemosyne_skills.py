@@ -68,15 +68,13 @@ from typing import Any, Callable
 SKILL_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.DOTALL)
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+try:
+    from mnemosyne_config import utcnow_iso as _utcnow, default_projects_dir as _default_projects_dir
+except ImportError:  # pragma: no cover — standalone-file fallback
+    def _utcnow() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
-
-def _default_projects_dir() -> Path:
-    try:
-        from mnemosyne_config import default_projects_dir
-        return default_projects_dir()
-    except ImportError:
+    def _default_projects_dir() -> Path:
         import os
         raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
         return Path(raw).expanduser().resolve() if raw else (

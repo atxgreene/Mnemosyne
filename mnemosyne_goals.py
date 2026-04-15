@@ -54,8 +54,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def _utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+try:
+    from mnemosyne_config import utcnow_iso as _utcnow
+except ImportError:  # pragma: no cover
+    def _utcnow() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _default_goals_path(projects_dir: Path | None = None) -> Path:

@@ -61,11 +61,10 @@ from typing import Any, Iterable, Iterator
 
 # ---- shared config ----------------------------------------------------------
 
-def _default_projects_dir() -> Path:
-    try:
-        from mnemosyne_config import default_projects_dir
-        return default_projects_dir()
-    except ImportError:
+try:
+    from mnemosyne_config import default_projects_dir as _default_projects_dir
+except ImportError:  # pragma: no cover — standalone-file fallback
+    def _default_projects_dir() -> Path:
         import os
         raw = os.environ.get("MNEMOSYNE_PROJECTS_DIR", "").strip()
         return (Path(raw).expanduser().resolve()
