@@ -182,10 +182,12 @@ body {
 .trait-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 6px 14px;
+  gap: 4px 14px;
   margin-top: 12px;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-dim);
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .trait-grid .trait {

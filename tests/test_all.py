@@ -3210,6 +3210,93 @@ def _():
         shutil.rmtree(pd)
 
 
+@test("avatar: AGI traits null when signal is absent")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        state = avatar_mod.compute_state(projects_dir=pd)
+        for k in ("wisdom", "restlessness", "novelty", "self_assessment"):
+            assert state[k] is None, f"{k} should be null in empty state"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar: self_assessment derived from evaluator verdicts")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            s.log("inner_dialogue_done",
+                   metadata={"evaluator_verdict": "accept"})
+            s.log("inner_dialogue_done",
+                   metadata={"evaluator_verdict": "accept"})
+            s.log("inner_dialogue_done",
+                   metadata={"evaluator_verdict": "revise"})
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+        state = avatar_mod.compute_state(projects_dir=pd)
+        # 2 accept / 3 total = 0.6667
+        assert abs(state["self_assessment"] - 0.6667) < 0.001, state["self_assessment"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar: restlessness derived from inter-turn gap variance")
+def _():
+    import time as _time
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            # Log turn_end events at irregular intervals
+            for gap in (0.001, 0.01, 0.001, 0.02, 0.001):
+                s.log("turn_end", status="ok", metadata={})
+                _time.sleep(gap)
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+        state = avatar_mod.compute_state(projects_dir=pd)
+        # We have >= 3 gaps, so restlessness should be a number, not null
+        assert state["restlessness"] is not None
+        assert 0.0 <= state["restlessness"] <= 1.0
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar: _compute_wisdom needs age + memory + identity")
+def _():
+    # No memory → null
+    assert avatar_mod._compute_wisdom(0, 30.0, 1.0) is None
+    # Too new → null
+    assert avatar_mod._compute_wisdom(500, 0.1, 1.0) is None
+    # Normal: depth × age × identity
+    w = avatar_mod._compute_wisdom(1000, 30.0, 0.9)
+    assert w is not None and 0.0 < w <= 1.0
+    # Identity slip drags wisdom toward zero
+    w_bad = avatar_mod._compute_wisdom(1000, 30.0, 0.1)
+    assert w_bad is not None and w_bad < w
+
+
+@test("avatar: render_svg with wisdom + self_assessment adds new elements")
+def _():
+    state = {
+        "schema_version": 1,
+        "palette": {"core": "#50aabd", "accent": "#d9bff2",
+                     "rim": "#6bb7cb", "bg": "#0a0d1a"},
+        "aura_radius": 100, "pulses_per_minute": 20, "rings": 0,
+        "health": 0.8, "activity_score": 0.5,
+        "skills_count": 0, "identity_slip_count": 0,
+        "l1_count": 0, "l2_count": 0, "l3_count": 0,
+        "mood_phase": "focus", "dreams_count": 0,
+        "wisdom": 0.75,           # renders outer dashed ring
+        "self_assessment": 0.5,   # renders ~6 rays
+        "restlessness": None,
+        "novelty": None,
+    }
+    svg = avatar_mod.render_svg(state, size=400)
+    assert "stroke-dasharray=\"4 6\"" in svg  # wisdom ring
+    # Count the <line> elements for rays — should have ~6
+    assert svg.count("<line") >= 3
+
+
 @test("avatar: memory rows + tier counts reflected in state")
 def _():
     pd = _tmp_projects_dir()

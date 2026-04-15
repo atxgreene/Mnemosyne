@@ -187,6 +187,9 @@ def _scan_recent_events(experiments_dir: Path,
         "tool_calls_ok": 0,
         "tool_calls_err": 0,
         "last_event_iso": None,
+        "turn_timestamps": [],      # for restlessness
+        "evaluator_verdicts": [],   # for self_assessment
+        "learned_skill_events": 0,  # for novelty
     }
     if not experiments_dir.is_dir():
         return out
@@ -226,11 +229,20 @@ def _scan_recent_events(experiments_dir: Path,
                     out["dreams"] += 1
                 elif et == "inner_dialogue_done":
                     out["inner_dialogues"] += 1
+                    md = e.get("metadata") or {}
+                    verdict = md.get("evaluator_verdict")
+                    if verdict in ("accept", "revise"):
+                        out["evaluator_verdicts"].append(verdict)
                 elif et == "tool_call":
                     if e.get("status") == "error":
                         out["tool_calls_err"] += 1
                     else:
                         out["tool_calls_ok"] += 1
+                elif et == "turn_end" and e.get("status") == "ok":
+                    if ts:
+                        out["turn_timestamps"].append(ts)
+                elif et == "skill_learned":
+                    out["learned_skill_events"] += 1
     out["last_event_iso"] = last_iso
     return out
 
@@ -297,6 +309,82 @@ def _diversity_score(event_types: dict[str, int]) -> float:
     return min(1.0, n / 12.0)
 
 
+# ---- AGI-scaling traits (computed when observable, null otherwise) ----------
+#
+# Each of these has a specific, defensible derivation. When the signal
+# isn't available the slot stays `None` instead of being faked. The UI
+# renders `None` as "not yet measured" instead of a number.
+
+def _compute_novelty(
+    skills_count_new: int,
+    skills_count_total: int,
+    window_days: float,
+) -> float | None:
+    """New skills learned per active-week, clipped [0..1]. Null when we
+    have no history (age < 1 day) or no skills at all."""
+    if window_days < 1.0 or skills_count_total == 0:
+        return None
+    per_week = (skills_count_new / window_days) * 7.0
+    return round(min(1.0, per_week / 3.0), 4)   # 3 new/week → 1.0
+
+
+def _compute_restlessness(
+    gaps_s: list[float],
+) -> float | None:
+    """Coefficient of variation of inter-turn gaps, clipped [0..1].
+    Null when we have fewer than 3 turns to compare."""
+    if len(gaps_s) < 3:
+        return None
+    mean = sum(gaps_s) / len(gaps_s)
+    if mean <= 0:
+        return None
+    var = sum((g - mean) ** 2 for g in gaps_s) / len(gaps_s)
+    stdev = var ** 0.5
+    cv = stdev / mean
+    return round(min(1.0, cv / 2.0), 4)   # CV=2.0 → 1.0
+
+
+def _compute_wisdom(
+    memory_count: int,
+    age_days: float,
+    identity_strength: float,
+) -> float | None:
+    """Log-scale memory depth × age, gated on identity_strength.
+    Intuition: an agent that has persisted long, accumulated memory,
+    and not lost itself has more 'wisdom' than a new or confused one.
+    Null for agents with no memory. Fully honest: not a deep signal,
+    just a composite. The UI labels it as 'composite' in the trait
+    grid so it isn't mistaken for an ML score.
+    """
+    import math as _m
+    if memory_count == 0 or age_days < 0.5:
+        return None
+    depth = _m.log10(1 + memory_count) / 4.0   # 10k memories → 1.0
+    age_factor = min(1.0, age_days / 90.0)     # 90 days → full weight
+    raw = depth * age_factor * identity_strength
+    return round(min(1.0, raw), 4)
+
+
+def _compute_self_assessment(
+    events: dict,
+) -> float | None:
+    """Mean evaluator verdict score over the window. Null when the
+    Evaluator persona hasn't fired. Scale: 0 = all revise, 1 = all
+    accept. Comes from inner_dialogue_done events whose metadata
+    carries evaluator_verdict.
+
+    Honest about the indirection: this reflects what the AGENT thought
+    of its own output (via the Evaluator persona), not an independent
+    judgment. Still informative — it tracks whether self-evaluation
+    trends toward accept over time.
+    """
+    verdicts = events.get("evaluator_verdicts") or []
+    if not verdicts:
+        return None
+    hits = sum(1 for v in verdicts if v == "accept")
+    return round(hits / len(verdicts), 4)
+
+
 # ---- main entry point ---------------------------------------------------
 
 def compute_state(
@@ -334,6 +422,26 @@ def compute_state(
     pulses_per_minute = 6 + int(54 * activity)
     rings = min(8, evt["inner_dialogues"])
 
+    # AGI-scaling traits — computed where observable, null otherwise
+    gaps: list[float] = []
+    ts_sorted = sorted(evt.get("turn_timestamps") or [])
+    for a, b in zip(ts_sorted, ts_sorted[1:]):
+        try:
+            t1 = datetime.fromisoformat(a.replace("Z", "+00:00"))
+            t2 = datetime.fromisoformat(b.replace("Z", "+00:00"))
+            gaps.append((t2 - t1).total_seconds())
+        except (ValueError, AttributeError):
+            continue
+
+    novelty = _compute_novelty(
+        skills_count_new=evt.get("learned_skill_events", 0),
+        skills_count_total=skills["total"],
+        window_days=max(0.0, age_days),
+    )
+    restlessness = _compute_restlessness(gaps)
+    wisdom_v = _compute_wisdom(mem["total"], age_days, identity_strength)
+    self_assessment = _compute_self_assessment(evt)
+
     return {
         "schema_version": SCHEMA_VERSION,
         "computed_utc": datetime.now(timezone.utc).strftime(
@@ -362,12 +470,12 @@ def compute_state(
         "rings": rings,
         "pulses_per_minute": pulses_per_minute,
         "last_event_iso": evt["last_event_iso"],
-        # Reserved AGI-scaling slots (always present; populated when we
-        # have a way to compute them honestly).
-        "wisdom": None,            # Future: agreement with self over time
-        "restlessness": None,      # Future: variance in inter-turn gap
-        "novelty": None,           # Future: rate of new skills learned
-        "self_assessment": None,   # Future: result of evaluator pass on self
+        # AGI-scaling traits — computed where observable, null otherwise.
+        # See the `_compute_*` helpers for the exact derivations.
+        "wisdom":          wisdom_v,          # log(mem) × age × identity
+        "restlessness":    restlessness,      # CV of inter-turn gaps
+        "novelty":         novelty,           # new skills per week
+        "self_assessment": self_assessment,   # evaluator accept ratio
     }
 
 
@@ -394,6 +502,7 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
     SMIL animation (renders animated in any modern browser; static in
     images-only viewers).
     """
+    import math as _math
     cx = size / 2
     cy = size / 2 + 10
     palette = state["palette"]
@@ -434,6 +543,28 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
     parts.append(f'<rect x="0" y="0" width="{size}" height="{size}" '
                   f'fill="{bg}"/>')
 
+    # Habitat: three memory-tier wave bands
+    total_mem = (int(state.get("l1_count", 0)) + int(state.get("l2_count", 0))
+                   + int(state.get("l3_count", 0)))
+    if total_mem > 0:
+        hab = 100.0
+        l1h = min(hab * 0.50, (state["l1_count"] / total_mem) * hab * 0.9)
+        l2h = min(hab * 0.70, (state["l2_count"] / total_mem) * hab * 0.9)
+        l3h = min(hab * 0.90, (state["l3_count"] / total_mem) * hab * 0.9)
+
+        def wave(h: float, amp: float) -> str:
+            return (f"M0,{size} L0,{size - h:.1f} "
+                    f"Q{size*0.3:.1f},{size - h - amp:.1f} "
+                    f"{size*0.5:.1f},{size - h - amp/2:.1f} "
+                    f"T{size},{size - h:.1f} L{size},{size} Z")
+
+        parts.append(f'<path d="{wave(l3h, 12)}" fill="{rim}" '
+                      f'fill-opacity="0.10"/>')
+        parts.append(f'<path d="{wave(l2h, 8)}" fill="{core}" '
+                      f'fill-opacity="0.12"/>')
+        parts.append(f'<path d="{wave(l1h, 6)}" fill="{accent}" '
+                      f'fill-opacity="0.15"/>')
+
     # Aura
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="{aura_r * 1.55:.1f}" '
                   f'fill="url(#auraGrad)" opacity="0.85">'
@@ -441,6 +572,30 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
                   f'values="0.35;0.95;0.35" dur="{pulse_s:.2f}s" '
                   f'repeatCount="indefinite"/>'
                   f'</circle>')
+
+    # Wisdom ring (outer, subtle, null-safe)
+    wisdom = state.get("wisdom")
+    if wisdom is not None and wisdom > 0:
+        wr = aura_r * 1.95
+        parts.append(f'<circle cx="{cx}" cy="{cy}" r="{wr:.1f}" '
+                      f'fill="none" stroke="{accent}" '
+                      f'stroke-opacity="{0.10 + 0.30 * wisdom:.3f}" '
+                      f'stroke-width="0.8" stroke-dasharray="4 6"/>')
+
+    # Self-assessment rays
+    self_assess = state.get("self_assessment")
+    if self_assess is not None:
+        ray_count = max(0, min(12, int(round(self_assess * 12))))
+        for i in range(ray_count):
+            a = (i / 12.0) * _math.pi * 2 + _math.pi / 12.0
+            r1 = aura_r * 0.35
+            r2 = aura_r * 0.52
+            x1 = cx + r1 * _math.cos(a); y1 = cy + r1 * _math.sin(a)
+            x2 = cx + r2 * _math.cos(a); y2 = cy + r2 * _math.sin(a)
+            parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" '
+                          f'x2="{x2:.1f}" y2="{y2:.1f}" '
+                          f'stroke="{rim}" stroke-opacity="0.55" '
+                          f'stroke-width="1.1" stroke-linecap="round"/>')
 
     # Inner-dialogue rings
     for i in range(rings):
@@ -464,7 +619,6 @@ def render_svg(state: dict[str, Any], *, size: int = 500) -> str:
                   f'fill="{accent}" opacity="0.95"/>')
 
     # Orbiters
-    import math as _math
     orbiter_count = max(0, min(12, skills_count))
     orbit_r = aura_r + 28
     orbit_speed = max(4.0, min(20.0, 20 - activity * 14))

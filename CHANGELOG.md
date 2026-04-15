@@ -2,6 +2,59 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.3.2] — 2026-04-15 — AGI traits + habitat + production deploy
+
+Three additions, each narrow:
+
+**AGI-scaling traits computed.** The four reserved slots in the
+avatar schema (`wisdom`, `restlessness`, `novelty`, `self_assessment`)
+are now populated where we have honest signal, left null otherwise.
+Definitions in `mnemosyne_avatar.py`:
+
+  wisdom          = log10(memory_count+1)/4 × min(age_days/90, 1) × identity_strength
+                    (null when memory empty or age < 0.5 days)
+  restlessness    = coefficient of variation of inter-turn gaps, clipped [0..1]
+                    (null when fewer than 3 successful turns to compare)
+  novelty         = skill_learned events per week, clipped [0..1]
+                    (null when age_days < 1 or no skills at all)
+  self_assessment = evaluator-persona accept ratio (accept / (accept + revise))
+                    (null when the Evaluator has never fired)
+
+Visually the avatar now shows:
+  - outer dashed rotating **wisdom ring** (opacity scales with wisdom)
+  - small **self-assessment rays** between core and inner-dialogue rings
+  - core-orb **jitter animation** when restlessness > 0.3
+
+**Habitat.** Three soft wave bands at the bottom of the avatar
+stage whose heights reflect L1/L2/L3 memory-tier proportions. Not a
+game background — environmental grounding so the avatar isn't
+floating in a void. Mirrored in both the JS renderer and the
+server-side `render_svg()` so standalone SVG dumps match the live UI.
+
+**Production deploy (`deploy/`).** One-line install helpers for
+running `mnemosyne-serve` as a per-user service:
+  - `deploy/mnemosyne.service` — systemd user unit with sandbox
+    hardening (NoNewPrivileges, ProtectHome=read-only,
+    ReadWritePaths limited to the projects dir)
+  - `deploy/com.atxgreene.mnemosyne.plist` — macOS launchd agent
+  - `deploy/install-service.sh` — detects OS, registers the right
+    unit, substitutes `$HOME` paths, optionally configures
+    `MNEMOSYNE_SERVE_TOKEN` from env. Supports install / --uninstall /
+    --status.
+
+**Wizard integration.** `mnemosyne-wizard.sh` now offers to launch
+`mnemosyne-serve` and open http://127.0.0.1:8484/ui at the end of
+setup. Cross-platform URL opener (xdg-open / open / cmd.exe start).
+
+**Tests:** 191 → 196 green. 5 new:
+  - avatar: AGI traits null when signal is absent
+  - avatar: self_assessment derived from evaluator verdicts
+  - avatar: restlessness derived from inter-turn gap variance
+  - avatar: _compute_wisdom needs age + memory + identity
+  - avatar: render_svg with wisdom + self_assessment adds new elements
+
+pyflakes clean. Version bumped 0.3.1 → 0.3.2.
+
 ## [0.3.1] — 2026-04-15 — fix concurrent MemoryStore race
 
 Two races surface under heavy batch-runner concurrency (`workers > 2`)

@@ -93,6 +93,75 @@ function buildSvg(state) {
 
   svg.appendChild(defs);
 
+  // ---- habitat: memory-tier terrain at the bottom ----
+  // Three soft wave bands whose heights scale with L1/L2/L3 memory
+  // counts. Thematic grounding for the avatar, not a game background.
+  const totalMem = state.l1_count + state.l2_count + state.l3_count;
+  if (totalMem > 0) {
+    const habH = 100;
+    const l1H = Math.min(habH * 0.50, (state.l1_count / totalMem) * habH * 0.9);
+    const l2H = Math.min(habH * 0.70, (state.l2_count / totalMem) * habH * 0.9);
+    const l3H = Math.min(habH * 0.90, (state.l3_count / totalMem) * habH * 0.9);
+    const W = AVATAR_VIEWBOX, H = AVATAR_VIEWBOX;
+    const wave = (h, amp) =>
+      `M0,${H} L0,${H - h} Q${W * 0.3},${H - h - amp}`
+      + ` ${W * 0.5},${H - h - amp / 2}`
+      + ` T${W},${H - h} L${W},${H} Z`;
+    svg.appendChild(el("path", {
+      d: wave(l3H, 12), fill: palette.rim, "fill-opacity": 0.10,
+    }));
+    svg.appendChild(el("path", {
+      d: wave(l2H, 8), fill: palette.core, "fill-opacity": 0.12,
+    }));
+    svg.appendChild(el("path", {
+      d: wave(l1H, 6), fill: palette.accent, "fill-opacity": 0.15,
+    }));
+  }
+
+  // ---- wisdom ring (very outer, subtle — appears only when measured) ----
+  if (state.wisdom != null && state.wisdom > 0) {
+    const wr = state.aura_radius * 1.95;
+    const wisdom = el("circle", {
+      cx, cy, r: wr,
+      fill: "none",
+      stroke: palette.accent,
+      "stroke-opacity": 0.10 + 0.30 * state.wisdom,
+      "stroke-width": 0.8,
+      "stroke-dasharray": "4 6",
+    });
+    wisdom.appendChild(el("animateTransform", {
+      attributeName: "transform",
+      type: "rotate",
+      from: `0 ${cx} ${cy}`,
+      to: `360 ${cx} ${cy}`,
+      dur: `${(80 - 60 * state.wisdom).toFixed(0)}s`,
+      repeatCount: "indefinite",
+    }));
+    svg.appendChild(wisdom);
+  }
+
+  // ---- self_assessment rays (straight lines radiating from core) ----
+  if (state.self_assessment != null) {
+    const rayCount = Math.max(0, Math.min(12, Math.round(state.self_assessment * 12)));
+    for (let i = 0; i < rayCount; i++) {
+      const a = (i / 12) * Math.PI * 2 + Math.PI / 12;
+      const r1 = state.aura_radius * 0.35;
+      const r2 = state.aura_radius * 0.52;
+      svg.appendChild(el("line", {
+        x1: cx + r1 * Math.cos(a), y1: cy + r1 * Math.sin(a),
+        x2: cx + r2 * Math.cos(a), y2: cy + r2 * Math.sin(a),
+        stroke: palette.rim,
+        "stroke-opacity": 0.55,
+        "stroke-width": 1.1,
+        "stroke-linecap": "round",
+      }));
+    }
+  }
+
+  // ---- restlessness: core orb jitter animation when high ----
+  // (applied later to the core element; flag here)
+  const restless = state.restlessness != null && state.restlessness > 0.3;
+
   // ---- aura ring (the breathing halo) ----
   const aura = el("circle", {
     cx, cy, r: state.aura_radius * 1.55,
@@ -144,6 +213,17 @@ function buildSvg(state) {
     "stroke-opacity": 0.55,
     "stroke-width": 1.5,
   });
+  if (restless) {
+    // Subtle jitter on high restlessness — a visible signal that the
+    // agent's turn rhythm is irregular.
+    const jitter = el("animate", {
+      attributeName: "cx",
+      values: `${cx};${cx - 2};${cx + 2};${cx}`,
+      dur: "0.4s",
+      repeatCount: "indefinite",
+    });
+    core.appendChild(jitter);
+  }
   svg.appendChild(core);
 
   // ---- eye (mood-aware) ----
@@ -258,6 +338,8 @@ function buildSvg(state) {
   return svg;
 }
 
+function pct(x) { return x == null ? "—" : (x * 100).toFixed(0) + "%"; }
+
 function renderTraitGrid(state, container) {
   const traits = [
     ["mood",            state.mood_phase],
@@ -270,9 +352,14 @@ function renderTraitGrid(state, container) {
     ["dreams",          state.dreams_count],
     ["inner dialogues", state.inner_dialogues],
     ["identity",        (state.identity_strength * 100).toFixed(1) + "%"],
-    ["activity",        (state.activity_score * 100).toFixed(0) + "%"],
-    ["health",          (state.health * 100).toFixed(0) + "%"],
+    ["activity",        pct(state.activity_score)],
+    ["health",          pct(state.health)],
     ["pulse",           state.pulses_per_minute + " bpm"],
+    // AGI-scaling traits. "—" when null (honest: not yet measured).
+    ["wisdom",          pct(state.wisdom)],
+    ["restlessness",    pct(state.restlessness)],
+    ["novelty",         pct(state.novelty)],
+    ["self-assessment", pct(state.self_assessment)],
   ];
   container.innerHTML = "";
   for (const [k, v] of traits) {

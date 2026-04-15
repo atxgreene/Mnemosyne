@@ -855,3 +855,40 @@ else
   printf '%s\n' "$DONE_MSG"
   echo
 fi
+
+# ---- offer to launch mnemosyne-serve + open dashboard -----------------------
+
+open_url() {
+  # Cross-platform URL opener. Silent if nothing works.
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$1" >/dev/null 2>&1 &
+  elif command -v open >/dev/null 2>&1; then
+    open "$1" >/dev/null 2>&1 &
+  elif command -v cmd.exe >/dev/null 2>&1; then
+    cmd.exe /c start "$1" >/dev/null 2>&1 &
+  fi
+}
+
+if tui_yesno "Launch dashboard?" \
+    "Start mnemosyne-serve now and open http://127.0.0.1:8484/ui in your browser?"; then
+  # Prefer the installed console script if the venv is active; else fall
+  # back to module invocation with sys.path set up.
+  if command -v mnemosyne-serve >/dev/null 2>&1; then
+    (mnemosyne-serve --host 127.0.0.1 --port 8484 \
+        --dream-every 30m --triage-every 10m --propose-every 30m \
+        >/tmp/mnemosyne-serve.log 2>&1 &
+    )
+    # Give it a moment to bind.
+    sleep 1.5
+    if curl -fsS http://127.0.0.1:8484/healthz >/dev/null 2>&1; then
+      ok "mnemosyne-serve listening on :8484"
+      open_url "http://127.0.0.1:8484/ui"
+    else
+      printf 'note: serve did not come up cleanly; tail /tmp/mnemosyne-serve.log\n' >&2
+    fi
+  else
+    printf 'note: mnemosyne-serve not on $PATH; activate the venv first:\n' >&2
+    printf '  source %s/.venv/bin/activate\n' "$MNEMOSYNE_PROJECTS_DIR" >&2
+    printf '  mnemosyne-serve\n' >&2
+  fi
+fi

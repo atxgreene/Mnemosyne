@@ -1,0 +1,50 @@
+; mnemosyne.service — systemd user unit for the Mnemosyne daemon.
+;
+; Install (per-user, no root required):
+;
+;   mkdir -p ~/.config/systemd/user
+;   cp deploy/mnemosyne.service ~/.config/systemd/user/
+;   systemctl --user daemon-reload
+;   systemctl --user enable --now mnemosyne
+;   systemctl --user status mnemosyne
+;
+; View logs:
+;   journalctl --user -u mnemosyne -f
+;
+; Open the dashboard:
+;   xdg-open http://127.0.0.1:8484/ui
+[Unit]
+Description=Mnemosyne local-first agent daemon
+Documentation=https://github.com/atxgreene/sturdy-doodle
+After=network.target
+
+[Service]
+Type=simple
+Environment="MNEMOSYNE_PROJECTS_DIR=%h/projects/mnemosyne"
+; Uncomment + set a real token to require Authorization: Bearer on every request.
+; Environment="MNEMOSYNE_SERVE_TOKEN=change-me"
+WorkingDirectory=%h/projects/mnemosyne
+ExecStart=%h/projects/mnemosyne/.venv/bin/mnemosyne-serve \
+    --host 127.0.0.1 --port 8484 \
+    --dream-every 30m --triage-every 10m --propose-every 30m
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+; Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/projects/mnemosyne
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target
