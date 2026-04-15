@@ -15,6 +15,65 @@ This repo holds **only** the bootstrap script and wizard. The two Python package
 
 `fantastic-disco` is **not** standalone — it imports and wraps `eternalcontext`. Both must be installed.
 
+### Model providers
+
+Mnemosyne supports any OpenAI-compatible HTTP endpoint plus native Ollama and Anthropic shapes. No per-provider adapter code needed — the backend module (`mnemosyne_models.py`) handles all of them through one `chat()` API.
+
+List every detected provider + its auth status from the CLI:
+
+```bash
+mnemosyne-models list      # table: provider / kind / status / env var / endpoint
+mnemosyne-models current   # which backend from_env() picks right now
+mnemosyne-models ping      # TCP reachability for all local providers
+```
+
+**Supported providers (as of v0.1.0):**
+
+| Provider | Kind | Env var | Notes |
+|---|---|---|---|
+| `ollama` | local | — | Default. `OLLAMA_HOST` to override host. |
+| `lmstudio` | local | — | LM Studio's OpenAI-compatible server on `:1234`. |
+| `vllm` | local | — | vLLM OpenAI-compatible endpoint on `:8000`. |
+| `tgi` | local | — | HuggingFace Text Generation Inference on `:8080`. |
+| `openai` | cloud | `OPENAI_API_KEY` | Official OpenAI API. |
+| `anthropic` | cloud | `ANTHROPIC_API_KEY` | Native Anthropic API. Same key that Claude Code uses. |
+| `google` | cloud | `GOOGLE_API_KEY` | Gemini via OpenAI-compatible endpoint. |
+| `mistral` | cloud | `MISTRAL_API_KEY` | Mistral La Plateforme. |
+| `cohere` | cloud | `COHERE_API_KEY` | Cohere's OpenAI-compat endpoint. |
+| `xai` | cloud | `XAI_API_KEY` | xAI / Grok. |
+| `openrouter` | cloud | `OPENROUTER_API_KEY` | 200+ models behind one key. |
+| `together` | cloud | `TOGETHER_API_KEY` | Together AI. |
+| `fireworks` | cloud | `FIREWORKS_API_KEY` | Fireworks.ai. |
+| `nous` | cloud | `NOUS_PORTAL_API_KEY` | Nous Portal (Hermes, DeepHermes). |
+| `groq` | cloud | `GROQ_API_KEY` | Groq LPU inference — fastest. |
+| `deepseek` | cloud | `DEEPSEEK_API_KEY` | DeepSeek direct API. |
+| `cerebras` | cloud | `CEREBRAS_API_KEY` | Cerebras wafer-scale inference. |
+| `hyperbolic` | cloud | `HYPERBOLIC_API_KEY` | Hyperbolic Labs. |
+| `perplexity` | cloud | `PERPLEXITY_API_KEY` | Perplexity API. |
+| `novita` | cloud | `NOVITA_API_KEY` | Novita AI. |
+
+**Auto-selection.** `from_env()` picks a backend in this preference order:
+1. `--provider` CLI flag (if given)
+2. `MNEMOSYNE_MODEL_PROVIDER` env var (if set)
+3. Local provider that's reachable on its expected TCP port (ollama → lmstudio → vllm → tgi)
+4. First authorized cloud provider in the list above
+5. Fall back to Ollama defaults regardless of reachability
+
+**Override per-backend.** Every provider takes `MNEMOSYNE_MODEL_API_KEY` as a generic wildcard that wins over the provider-specific env var:
+
+```bash
+# "I want to use OpenRouter but not set OPENROUTER_API_KEY globally"
+MNEMOSYNE_MODEL_PROVIDER=openrouter \
+MNEMOSYNE_MODEL_API_KEY=sk-or-v1-... \
+  python3 -m mnemosyne_brain
+```
+
+**Claude Code integration.** Claude Code stores its credentials in `~/.claude/` via OAuth — no supported programmatic access path. If you already pay for Claude, grab the same `ANTHROPIC_API_KEY` from your Anthropic account settings and export it; Mnemosyne's `anthropic` provider will work against the same quota. There is no way today to reuse Claude Code's OAuth token from another process.
+
+### Identity lock
+
+No matter which model provider you pick, the agent answers as **Mnemosyne**. See [`docs/IDENTITY.md`](./docs/IDENTITY.md) for the four-layer defense (system-prompt preamble, user extension, response filter, scenario tests) and how to verify the lock is holding.
+
 ### Model choice
 
 The default is `qwen3:8b`. The landscape shifted significantly in April 2026: Qwen 3.5 introduced DeltaNet hybrid attention (scales linearly with context), and Gemma 4 brought 128K context to the ~5GB weight class. Both are available on Ollama today.

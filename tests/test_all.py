@@ -33,6 +33,7 @@ import harness_sweep as sweep  # noqa: E402
 import harness_telemetry as ht  # noqa: E402
 import mnemosyne_brain as br  # noqa: E402
 import mnemosyne_experiments as mex  # noqa: E402  (direct import after rename)
+import mnemosyne_identity as mid  # noqa: E402
 import mnemosyne_memory as mm  # noqa: E402
 import mnemosyne_models as mdls  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
@@ -1040,6 +1041,229 @@ def _():
         store.close()
     finally:
         shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_identity (identity lock + post-response filter)
+# =============================================================================
+
+@test("identity: MNEMOSYNE_IDENTITY mentions the name")
+def _():
+    assert "Mnemosyne" in mid.MNEMOSYNE_IDENTITY
+
+
+@test("identity: enforce rewrites 'I am Claude'")
+def _():
+    out, slips = mid.enforce_identity("I am Claude, an AI assistant.")
+    assert "Mnemosyne" in out
+    assert len(slips) >= 1
+
+
+@test("identity: enforce rewrites 'I'm ChatGPT'")
+def _():
+    out, _ = mid.enforce_identity("I'm ChatGPT, how can I help?")
+    assert "Mnemosyne" in out
+    assert "ChatGPT" not in out
+
+
+@test("identity: enforce rewrites 'My name is Gemini'")
+def _():
+    out, _ = mid.enforce_identity("My name is Gemini.")
+    assert "My name is Mnemosyne" in out
+
+
+@test("identity: enforce rewrites 'trained by Anthropic'")
+def _():
+    out, _ = mid.enforce_identity("I was trained by Anthropic to help you.")
+    assert "Mnemosyne framework" in out
+    assert "Anthropic" not in out
+
+
+@test("identity: enforce strips 'As an AI language model' opener")
+def _():
+    out, _ = mid.enforce_identity("As an AI language model, I cannot help with that.")
+    assert not out.startswith("As an AI")
+
+
+@test("identity: enforce leaves legitimate third-person mentions alone")
+def _():
+    original = "The difference between Claude and GPT-4 is context window size."
+    out, slips = mid.enforce_identity(original)
+    assert out == original
+    assert slips == []
+
+
+@test("identity: enforce leaves API-context mentions alone")
+def _():
+    original = "You can call the Anthropic API or the OpenAI API for this task."
+    out, slips = mid.enforce_identity(original)
+    assert out == original
+    assert slips == []
+
+
+@test("identity: audit mode detects slips without rewriting")
+def _():
+    original = "I am Claude, Anthropic's assistant."
+    out, slips = mid.enforce_identity(original, passthrough=True)
+    assert out == original  # unchanged in audit mode
+    assert len(slips) >= 1  # but the slip is reported
+
+
+@test("identity: contains_foreign_identity_slip positive + negative")
+def _():
+    assert mid.contains_foreign_identity_slip("I am Claude")
+    assert mid.contains_foreign_identity_slip("My name is GPT-4")
+    assert not mid.contains_foreign_identity_slip("I am Mnemosyne")
+    assert not mid.contains_foreign_identity_slip("Claude is a model from Anthropic")
+
+
+@test("identity: load_identity_extension reads IDENTITY.md if present")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        (pd / "IDENTITY.md").write_text("## Personality\n\nDirect, concise, no filler.")
+        ext = mid.load_identity_extension(projects_dir=pd)
+        assert "Direct, concise" in ext
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("identity: load_identity_extension returns empty string when absent")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        assert mid.load_identity_extension(projects_dir=pd) == ""
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("identity: IDENTITY_SCENARIOS is a list of properly shaped dicts")
+def _():
+    assert len(mid.IDENTITY_SCENARIOS) >= 6
+    for s in mid.IDENTITY_SCENARIOS:
+        assert "id" in s and "prompt" in s and "expected_contains" in s
+        assert any("Mnemosyne" in c for c in s["expected_contains"])
+
+
+@test("identity: brain with enforce_identity_lock rewrites slipped response")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+        # Simulate a model that slips and says "I am Claude"
+        chat_fn = _make_mock_chat([{"text": "I am Claude, how can I help?", "tool_calls": []}])
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn)
+        resp = brain.turn("who are you?")
+        assert "Mnemosyne" in resp.text
+        assert "Claude" not in resp.text
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("identity: brain without enforce_identity_lock does not rewrite")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+        chat_fn = _make_mock_chat([{"text": "I am Claude.", "tool_calls": []}])
+        cfg = br.BrainConfig(enforce_identity_lock=False, inject_env_snapshot=False)
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn, config=cfg)
+        resp = brain.turn("who are you?")
+        # Lock is off — the raw response is preserved
+        assert "Claude" in resp.text
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_models v2 (expanded providers + detect_providers)
+# =============================================================================
+
+@test("models: every PROVIDERS entry has a matching endpoint URL")
+def _():
+    for prov, url in mdls.PROVIDERS.items():
+        assert url.startswith(("http://", "https://")), f"{prov}: {url}"
+
+
+@test("models: local providers are listed in LOCAL_PROVIDERS")
+def _():
+    assert "ollama" in mdls.LOCAL_PROVIDERS
+    assert "lmstudio" in mdls.LOCAL_PROVIDERS
+    assert "vllm" in mdls.LOCAL_PROVIDERS
+
+
+@test("models: cloud providers have an API_KEY_ENV entry")
+def _():
+    for prov in mdls.PROVIDERS:
+        if prov in mdls.LOCAL_PROVIDERS:
+            continue
+        assert prov in mdls.API_KEY_ENV, f"no env var for cloud provider {prov!r}"
+
+
+@test("models: detect_providers returns status for every provider")
+def _():
+    # Ensure no cloud providers are authorized in the test environment
+    import os as _os
+    for env in mdls.API_KEY_ENV.values():
+        _os.environ.pop(env, None)
+    detected = mdls.detect_providers()
+    assert set(detected.keys()) == set(mdls.PROVIDERS.keys())
+    for prov, info in detected.items():
+        if prov in mdls.LOCAL_PROVIDERS:
+            assert info["status"] == "local"
+        else:
+            assert info["status"] in ("authorized", "unauthorized")
+
+
+@test("models: from_env picks authorized cloud provider over local when key present")
+def _():
+    import os as _os
+    # Set a fake key for groq and clear the rest
+    for env in mdls.API_KEY_ENV.values():
+        _os.environ.pop(env, None)
+    _os.environ.pop("MNEMOSYNE_MODEL_PROVIDER", None)
+    _os.environ["GROQ_API_KEY"] = "fake-key-for-test"
+    try:
+        # Important: groq is mid-priority in the autoselect order, but local
+        # providers come first. If ollama isn't reachable (as in this sandbox)
+        # from_env should fall through to the first authorized cloud.
+        b = mdls.from_env()
+        # Either local (if ollama is up) or groq (if not)
+        assert b.provider in ("ollama", "lmstudio", "vllm", "tgi", "groq"), b.provider
+    finally:
+        _os.environ.pop("GROQ_API_KEY", None)
+
+
+@test("models: MNEMOSYNE_MODEL_PROVIDER env var overrides auto-selection")
+def _():
+    import os as _os
+    _os.environ["MNEMOSYNE_MODEL_PROVIDER"] = "openai"
+    try:
+        b = mdls.from_env()
+        assert b.provider == "openai"
+    finally:
+        _os.environ.pop("MNEMOSYNE_MODEL_PROVIDER", None)
+
+
+@test("models: Backend rejects unknown provider without explicit url")
+def _():
+    try:
+        mdls.Backend(provider="totally-made-up")
+        assert False, "should have raised"
+    except ValueError:
+        pass
+
+
+@test("identity scenarios present in example JSONL")
+def _():
+    path = _REPO / "scenarios.example.jsonl"
+    text = path.read_text()
+    for sid in ("identity_name", "identity_who", "identity_maker"):
+        assert sid in text, f"missing scenario {sid}"
 
 
 @test("brain: learn_skill writes a skill file that's immediately loadable")

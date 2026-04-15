@@ -75,6 +75,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import mnemosyne_identity as identity
 import mnemosyne_memory as mm
 import mnemosyne_models as models
 import mnemosyne_skills as skills_mod
@@ -125,6 +126,14 @@ class BrainConfig:
     memory_tier_ceiling: int = mm.L2_WARM    # exclude L3 from normal retrieval
     inject_env_snapshot: bool = True         # first-turn context injection
     max_tool_iterations: int = 3             # depth of tool-use loop before stopping
+
+    # Identity lock: keep the agent identifying as Mnemosyne regardless of
+    # which underlying model is processing the turn. See mnemosyne_identity.
+    #   enforce_identity_lock=True        — inject MNEMOSYNE_IDENTITY + filter responses
+    #   enforce_identity_lock=False       — trust the model's own identity
+    #   enforce_identity_audit_only=True  — detect but don't rewrite (measure leak rate)
+    enforce_identity_lock: bool = True
+    enforce_identity_audit_only: bool = False
 
 
 # ---- brain ------------------------------------------------------------------
@@ -240,6 +249,15 @@ class Brain:
         messages: list[dict[str, Any]] = []
         system_parts: list[str] = []
 
+        # Identity lock — always first, non-negotiable. The user cannot disable
+        # this via personality config; only the BrainConfig toggle can.
+        if self.config.enforce_identity_lock:
+            system_parts.append(identity.MNEMOSYNE_IDENTITY.strip())
+            # IDENTITY.md extends (does not override) the lock
+            ext = identity.load_identity_extension()
+            if ext:
+                system_parts.append("## User identity extension\n\n" + ext)
+
         if self.config.personality:
             system_parts.append(self.config.personality.strip())
 
@@ -336,7 +354,25 @@ class Brain:
                 })
             # Loop: model gets to see tool results and either call more tools or produce final text.
 
-        # 4. Persist a salient memory for the turn (warm tier)
+        # 4. Apply the identity lock to whatever the model produced
+        if self.config.enforce_identity_lock and final_text:
+            final_text, slips = identity.enforce_identity(
+                final_text,
+                known_model=self.config.backend.default_model,
+                passthrough=self.config.enforce_identity_audit_only,
+            )
+            if slips:
+                # Log every slip so the observability substrate can measure
+                # identity-lock leak rate per model / per run.
+                self._log(
+                    "identity_slip_detected",
+                    status="error" if not self.config.enforce_identity_audit_only else "ok",
+                    metadata={"slips": slips, "count": len(slips),
+                              "audit_only": self.config.enforce_identity_audit_only},
+                    parent_event_id=parent_evt,
+                )
+
+        # 5. Persist a salient memory for the turn (warm tier)
         if final_text:
             self.memory.write(
                 content=f"Q: {user_message}\nA: {final_text[:500]}",

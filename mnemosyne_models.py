@@ -54,27 +54,65 @@ from typing import Any, Optional
 
 
 # Well-known provider endpoints. The brain or a user can override via Backend(url=...)
+# Every OpenAI-compatible endpoint "just works" through this module — you can add
+# a new provider by dropping a URL into this dict and an env-var name into
+# API_KEY_ENV. No subclassing, no adapter code.
 PROVIDERS: dict[str, str] = {
+    # Local runtimes (no API key required)
     "ollama":     "http://localhost:11434/api/chat",
+    "lmstudio":   "http://localhost:1234/v1/chat/completions",
+    "vllm":       "http://localhost:8000/v1/chat/completions",
+    "tgi":        "http://localhost:8080/v1/chat/completions",           # HuggingFace TGI
+
+    # First-party commercial
     "openai":     "https://api.openai.com/v1/chat/completions",
+    "anthropic":  "https://api.anthropic.com/v1/messages",               # native shape, handled specially
+    "google":     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    "mistral":    "https://api.mistral.ai/v1/chat/completions",
+    "cohere":     "https://api.cohere.ai/compatibility/v1/chat/completions",
+    "xai":        "https://api.x.ai/v1/chat/completions",
+
+    # Aggregators / inference platforms
     "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     "together":   "https://api.together.xyz/v1/chat/completions",
     "fireworks":  "https://api.fireworks.ai/inference/v1/chat/completions",
-    "anthropic":  "https://api.anthropic.com/v1/messages",  # different shape, handled specially
     "nous":       "https://inference-api.nousresearch.com/v1/chat/completions",
-    "lmstudio":   "http://localhost:1234/v1/chat/completions",
-    "vllm":       "http://localhost:8000/v1/chat/completions",
+    "groq":       "https://api.groq.com/openai/v1/chat/completions",
+    "deepseek":   "https://api.deepseek.com/v1/chat/completions",
+    "cerebras":   "https://api.cerebras.ai/v1/chat/completions",
+    "hyperbolic": "https://api.hyperbolic.xyz/v1/chat/completions",
+    "perplexity": "https://api.perplexity.ai/chat/completions",
+    "novita":     "https://api.novita.ai/v3/openai/chat/completions",
 }
 
-# Env-var name for each provider's key
+# Env-var name for each provider's key. Providers marked (local) don't need one.
 API_KEY_ENV: dict[str, str] = {
+    # local — no key:
+    #   ollama, lmstudio, vllm, tgi
+
+    # first-party commercial
     "openai":     "OPENAI_API_KEY",
+    "anthropic":  "ANTHROPIC_API_KEY",
+    "google":     "GOOGLE_API_KEY",          # Gemini via OpenAI-compat endpoint
+    "mistral":    "MISTRAL_API_KEY",
+    "cohere":     "COHERE_API_KEY",
+    "xai":        "XAI_API_KEY",
+
+    # aggregators
     "openrouter": "OPENROUTER_API_KEY",
     "together":   "TOGETHER_API_KEY",
     "fireworks":  "FIREWORKS_API_KEY",
-    "anthropic":  "ANTHROPIC_API_KEY",
     "nous":       "NOUS_PORTAL_API_KEY",
+    "groq":       "GROQ_API_KEY",
+    "deepseek":   "DEEPSEEK_API_KEY",
+    "cerebras":   "CEREBRAS_API_KEY",
+    "hyperbolic": "HYPERBOLIC_API_KEY",
+    "perplexity": "PERPLEXITY_API_KEY",
+    "novita":     "NOVITA_API_KEY",
 }
+
+# Providers that don't require an API key (local runtimes)
+LOCAL_PROVIDERS: set[str] = {"ollama", "lmstudio", "vllm", "tgi"}
 
 
 @dataclass
@@ -386,26 +424,88 @@ def _parse_json_safe(val: Any) -> Any:
 
 # ---- ergonomic helpers ------------------------------------------------------
 
+def detect_providers() -> dict[str, dict[str, Any]]:
+    """Return a map of {provider: {status, endpoint, env_var, reachable?}}
+    for every provider known to this module.
+
+    status is one of:
+      "authorized"   — API key env var is set (or provider is local)
+      "unauthorized" — cloud provider, no API key set
+      "local"        — local provider, reachable over TCP (if checked)
+      "unreachable"  — local provider, no TCP listener at its endpoint
+
+    Intended for CLI tools like `mnemosyne-models-ls` that help the user
+    understand which backends are available right now without writing
+    them out of the config.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for prov, endpoint in PROVIDERS.items():
+        info: dict[str, Any] = {"endpoint": endpoint}
+        if prov in LOCAL_PROVIDERS:
+            info["kind"] = "local"
+            info["env_var"] = None
+            # Don't require reachability check — just report it was polled
+            info["status"] = "local"
+            info["reachable"] = reachable(Backend(provider=prov))
+        else:
+            env_var = API_KEY_ENV.get(prov)
+            info["kind"] = "cloud"
+            info["env_var"] = env_var
+            has_key = bool(env_var and os.environ.get(env_var, "").strip())
+            info["status"] = "authorized" if has_key else "unauthorized"
+        result[prov] = info
+    return result
+
+
+# Preference order for from_env() auto-selection. Local-first, then aggregators
+# that give broad model access, then first-party. Users override with an
+# explicit provider= argument or MNEMOSYNE_MODEL_PROVIDER env var.
+_AUTOSELECT_ORDER = [
+    "ollama", "lmstudio", "vllm", "tgi",
+    "openrouter", "nous", "groq", "cerebras",
+    "anthropic", "openai", "google", "mistral", "xai", "cohere",
+    "deepseek", "together", "fireworks", "hyperbolic", "perplexity", "novita",
+]
+
+
 def from_env(provider: str | None = None) -> Backend:
     """Construct a Backend from environment variables.
 
-    If `provider` is None, picks the first provider for which an API key is
-    present, else falls back to Ollama local.
+    Selection logic:
+      1. If `provider` is given, use it.
+      2. If $MNEMOSYNE_MODEL_PROVIDER is set, use it.
+      3. Pick the first authorized cloud provider OR reachable local
+         provider from _AUTOSELECT_ORDER.
+      4. Fall back to Ollama local with whatever $OLLAMA_HOST / $OLLAMA_MODEL
+         suggest (or the stdlib defaults).
     """
-    if provider:
-        return Backend(provider=provider)
-    for prov in ("openrouter", "openai", "anthropic", "nous", "together", "fireworks"):
-        env_var = API_KEY_ENV.get(prov)
-        if env_var and os.environ.get(env_var, "").strip():
+    chosen = provider or os.environ.get("MNEMOSYNE_MODEL_PROVIDER", "").strip() or None
+    if chosen:
+        # Honor OLLAMA_HOST override for ollama provider
+        if chosen == "ollama":
+            ollama_host = os.environ.get("OLLAMA_HOST", "").strip()
+            if ollama_host:
+                return Backend(
+                    provider="ollama",
+                    url=ollama_host.rstrip("/") + "/api/chat",
+                    default_model=os.environ.get("OLLAMA_MODEL", "qwen3:8b").strip(),
+                )
+        return Backend(provider=chosen)
+
+    detected = detect_providers()
+    for prov in _AUTOSELECT_ORDER:
+        info = detected.get(prov, {})
+        if info.get("status") == "authorized":
             return Backend(provider=prov)
-    # Ollama host override
-    ollama_host = os.environ.get("OLLAMA_HOST", "").strip()
-    if ollama_host:
-        return Backend(
-            provider="ollama",
-            url=ollama_host.rstrip("/") + "/api/chat",
-            default_model=os.environ.get("OLLAMA_MODEL", "qwen3:8b").strip(),
-        )
+        if info.get("status") == "local" and info.get("reachable"):
+            if prov == "ollama":
+                return Backend(
+                    provider="ollama",
+                    default_model=os.environ.get("OLLAMA_MODEL", "qwen3:8b").strip(),
+                )
+            return Backend(provider=prov)
+
+    # Nothing authorized, nothing local reachable — return default Ollama
     return Backend()
 
 
@@ -422,3 +522,99 @@ def reachable(backend: Backend | None = None) -> bool:
             return True
     except Exception:
         return False
+
+
+# ---- CLI: mnemosyne-models ---------------------------------------------------
+
+def _main(argv: list[str] | None = None) -> int:
+    """CLI: list detected providers, show current auto-selection, test a call.
+
+    Subcommands:
+      list        print all known providers with status + endpoint
+      current     show which provider from_env() would auto-select
+      ping        TCP-level reachability probe for a given provider (or all)
+    """
+    import argparse
+    import json
+    import sys
+
+    p = argparse.ArgumentParser(
+        prog="mnemosyne-models",
+        description="Inspect and manage model backends. Shows which providers "
+                    "are authorized (have API keys) or reachable (local).",
+    )
+    p.add_argument("--json", action="store_true")
+    sub = p.add_subparsers(dest="cmd", required=False)
+
+    sub.add_parser("list", help="list all known providers and their status")
+    sub.add_parser("current", help="show which provider from_env() picks")
+
+    pg = sub.add_parser("ping", help="TCP reachability probe for one or all providers")
+    pg.add_argument("provider", nargs="?", help="provider name, or omit to ping all")
+
+    args = p.parse_args(argv)
+    cmd = args.cmd or "list"
+
+    if cmd == "list":
+        detected = detect_providers()
+        if args.json:
+            json.dump(detected, sys.stdout, indent=2, default=str)
+            print()
+            return 0
+        # Human-readable table
+        print(f"{'provider':<14}  {'kind':<6}  {'status':<13}  {'env var':<22}  endpoint")
+        print("-" * 120)
+        for prov in sorted(detected):
+            info = detected[prov]
+            env_var = info.get("env_var") or "-"
+            status = info["status"]
+            if info["kind"] == "local":
+                status += "/reachable" if info.get("reachable") else "/unreachable"
+            print(f"{prov:<14}  {info['kind']:<6}  {status:<13}  {env_var:<22}  {info['endpoint']}")
+        return 0
+
+    if cmd == "current":
+        b = from_env()
+        out = {
+            "provider": b.provider,
+            "endpoint": b.endpoint,
+            "default_model": b.default_model,
+            "has_api_key": bool(b.resolve_api_key()),
+        }
+        if args.json:
+            json.dump(out, sys.stdout, indent=2)
+            print()
+        else:
+            print(f"provider:       {b.provider}")
+            print(f"endpoint:       {b.endpoint}")
+            print(f"default_model:  {b.default_model}")
+            print(f"has_api_key:    {out['has_api_key']}")
+        return 0
+
+    if cmd == "ping":
+        targets: list[str]
+        if args.provider:
+            if args.provider not in PROVIDERS:
+                print(f"unknown provider: {args.provider}", file=sys.stderr)
+                return 2
+            targets = [args.provider]
+        else:
+            targets = list(PROVIDERS.keys())
+        results: dict[str, bool] = {}
+        for prov in targets:
+            ok = reachable(Backend(provider=prov))
+            results[prov] = ok
+            if not args.json:
+                mark = "✓" if ok else "✗"
+                print(f"  {mark} {prov:<14} {PROVIDERS[prov]}")
+        if args.json:
+            json.dump(results, sys.stdout, indent=2)
+            print()
+        return 0
+
+    return 2
+
+
+if __name__ == "__main__":
+    import sys as _sys
+    _sys.exit(_main())

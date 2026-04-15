@@ -44,6 +44,8 @@ environment-snapshot   = "environment_snapshot:main"
 obsidian-search        = "obsidian_search:main"
 notion-search          = "notion_search:main"
 harness-telemetry      = "harness_telemetry:_main_smoke"
+mnemosyne-models       = "mnemosyne_models:_main"
+mnemosyne-memory       = "mnemosyne_memory:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -65,6 +67,7 @@ py-modules = [
     "mnemosyne_models",
     "mnemosyne_skills",
     "mnemosyne_brain",
+    "mnemosyne_identity",
 ]
 
 [tool.setuptools.package-data]
