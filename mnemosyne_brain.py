@@ -135,6 +135,13 @@ class BrainConfig:
     enforce_identity_lock: bool = True
     enforce_identity_audit_only: bool = False
 
+    # Local-model friendliness: when True, the brain probes the configured
+    # Ollama model's context window at first turn and caps memory_retrieval_limit
+    # to a fraction of it (so a 2B model with 32K context doesn't get 6000 tokens
+    # of retrieved memories dumped on it while also trying to hold a long
+    # conversation). Safe no-op on cloud providers.
+    adapt_to_context: bool = True
+
 
 # ---- brain ------------------------------------------------------------------
 
@@ -176,6 +183,12 @@ class Brain:
         self._turns_successful = 0
         self._turns_failed = 0
         self._env_snapshot_injected = False
+        self._context_adapted = False  # True after first successful context probe
+
+        # Adapt retrieval budget to local-model context window at construction
+        # time (cheap probe — skipped if model is remote or Ollama is unreachable).
+        if self.config.adapt_to_context:
+            self._maybe_adapt_to_context()
 
     # ---- per-turn entry point -----------------------------------------------
 
@@ -391,6 +404,35 @@ class Brain:
         )
 
     # ---- helpers ------------------------------------------------------------
+
+    def _maybe_adapt_to_context(self) -> None:
+        """Probe the configured Ollama model and cap memory_retrieval_limit
+        to fit its context window. No-op for non-local backends."""
+        backend = self.config.backend
+        if backend.provider != "ollama":
+            return
+        try:
+            host = backend.url.rsplit("/api/", 1)[0] if backend.url else None
+            info = models.ollama_model_info(backend.default_model, host=host, timeout=2.0)
+        except Exception:
+            return
+        if info.get("error"):
+            return  # model not pulled / probe failed — keep default
+        ctx = info.get("context_length")
+        if not ctx:
+            return
+        budget = models.recommended_context_budget(ctx)
+        if budget < self.config.memory_retrieval_limit:
+            self.config.memory_retrieval_limit = budget
+            self._log(
+                "context_adapted",
+                metadata={
+                    "model": backend.default_model,
+                    "context_length": ctx,
+                    "new_retrieval_limit": budget,
+                },
+            )
+        self._context_adapted = True
 
     def _build_env_snapshot(self) -> str:
         """Call environment-snapshot for the first-turn preamble. Safe if missing."""

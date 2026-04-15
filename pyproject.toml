@@ -46,6 +46,7 @@ notion-search          = "notion_search:main"
 harness-telemetry      = "harness_telemetry:_main_smoke"
 mnemosyne-models       = "mnemosyne_models:_main"
 mnemosyne-memory       = "mnemosyne_memory:_main"
+mnemosyne-triage       = "mnemosyne_triage:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -68,6 +69,8 @@ py-modules = [
     "mnemosyne_skills",
     "mnemosyne_brain",
     "mnemosyne_identity",
+    # v1.1 self-healing feedback loop (CREAO/Peter-Pang-inspired)
+    "mnemosyne_triage",
 ]
 
 [tool.setuptools.package-data]

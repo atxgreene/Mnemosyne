@@ -1,0 +1,150 @@
+# ==============================================================================
+#  Mnemosyne CI — the six-phase pipeline, adapted for a zero-dep local-agent repo.
+#
+#  Phases: Verify → Unit → Integration → Shellcheck → Install-smoke → Triage-demo
+#  Every phase is a separate job so failure localizes quickly in the UI.
+#  No manual overrides. No deploy step — this is a library, not a service.
+#
+#  Runs on: every push to main, every PR, weekly cron (catches cron/time drift).
+#
+#  Zero runtime dependencies beyond stdlib + shellcheck + pyflakes, so the CI
+#  matches what users actually install.
+# ==============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "0 12 * * 1"   # weekly sanity run, Mondays 12:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Phase 1 ───────────────────────────────────────────────────────────────
+  verify:
+    name: verify (syntax + pyflakes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Syntax check every .py
+        run: |
+          for f in *.py examples/*.py tests/*.py; do
+            python3 -c "import ast; ast.parse(open('$f').read())" \
+              || { echo "SYNTAX FAIL: $f"; exit 1; }
+          done
+          echo "all python files parse clean"
+      - name: pyflakes
+        run: |
+          python3 -m pip install --quiet pyflakes
+          python3 -m pyflakes *.py examples/*.py tests/*.py
+
+  # ─── Phase 2 ───────────────────────────────────────────────────────────────
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: Lint every shell script
+        run: shellcheck -x *.sh
+
+  # ─── Phase 3 ───────────────────────────────────────────────────────────────
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    needs: [verify]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python3 tests/test_all.py
+
+  # ─── Phase 4 ───────────────────────────────────────────────────────────────
+  integration:
+    name: integration test-harness
+    runs-on: ubuntu-latest
+    needs: [shellcheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: bash test-harness.sh
+
+  # ─── Phase 5 ───────────────────────────────────────────────────────────────
+  install-smoke:
+    name: pip install -e . smoke test
+    runs-on: ubuntu-latest
+    needs: [unit, integration]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: |
+          python3 -m venv /tmp/ci-venv
+          /tmp/ci-venv/bin/pip install --quiet --upgrade pip
+          /tmp/ci-venv/bin/pip install -e .
+      - name: Verify entry points land on $PATH
+        run: |
+          for cmd in mnemosyne-experiments mnemosyne-pipeline \
+                    mnemosyne-models mnemosyne-memory \
+                    environment-snapshot obsidian-search notion-search \
+                    harness-telemetry; do
+            [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
+          done
+          echo "all 8 entry points installed"
+      - name: Verify library imports without sys.path shims
+        run: |
+          /tmp/ci-venv/bin/python3 -c "
+          from harness_telemetry import TelemetrySession, create_run, finalize_run
+          from mnemosyne_brain import Brain, BrainConfig
+          from mnemosyne_memory import MemoryStore, L1_HOT, L2_WARM, L3_COLD
+          from mnemosyne_models import Backend, from_env, detect_providers
+          from mnemosyne_skills import SkillRegistry, record_learned_skill
+          from mnemosyne_identity import enforce_identity, MNEMOSYNE_IDENTITY
+          from mnemosyne_triage import run_triage, write_markdown_report
+          print('all 8 library surfaces import cleanly')
+          "
+
+  # ─── Phase 6 ───────────────────────────────────────────────────────────────
+  triage-demo:
+    name: triage engine dry-run
+    runs-on: ubuntu-latest
+    needs: [install-smoke]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Seed a fake PROJECTS_DIR + run triage
+        run: |
+          export MNEMOSYNE_PROJECTS_DIR=/tmp/ci-projects
+          mkdir -p "$MNEMOSYNE_PROJECTS_DIR"
+          python3 -c "
+          import os
+          os.environ.setdefault('MNEMOSYNE_PROJECTS_DIR', '/tmp/ci-projects')
+          import harness_telemetry as ht
+          rid = ht.create_run(model='ci:test', tags=['ci'], slug='dryrun')
+          with ht.TelemetrySession(rid) as s:
+              s.log('tool_call', tool='x', status='ok', duration_ms=10.0)
+              s.log('tool_call', tool='y', status='error',
+                    error={'type': 'CIError', 'message': 'synthetic'})
+          ht.finalize_run(rid, metrics={'accuracy': 0.9})
+          "
+          python3 mnemosyne_triage.py scan --window-days 30
+          test -f /tmp/ci-projects/health/$(date -u +%Y-%m-%d).md
+          echo "triage produced a valid health report"

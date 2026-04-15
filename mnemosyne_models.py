@@ -524,6 +524,142 @@ def reachable(backend: Backend | None = None) -> bool:
         return False
 
 
+# ---- Ollama-specific local-model helpers ------------------------------------
+
+def _ollama_base(host: str | None = None) -> str:
+    h = (host or os.environ.get("OLLAMA_HOST", "") or "http://localhost:11434").strip()
+    return h.rstrip("/")
+
+
+def ollama_list_pulled(host: str | None = None, timeout: float = 3.0) -> list[str]:
+    """List models that `ollama pull` has already downloaded.
+
+    Returns an empty list if Ollama isn't running. Never raises on timeout
+    — this is meant for discovery, not fatal errors.
+    """
+    import urllib.request
+    import urllib.error
+    try:
+        with urllib.request.urlopen(f"{_ollama_base(host)}/api/tags", timeout=timeout) as r:
+            data = json.load(r)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+        return []
+    return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+
+
+def ollama_model_info(model: str, host: str | None = None, timeout: float = 5.0) -> dict[str, Any]:
+    """Fetch metadata for an Ollama model via /api/show.
+
+    Returns {context_length, family, parameter_size, quantization, details}
+    when available, or {"error": ...} on failure.
+
+    Important for local-first tuning: callers use this to pick a
+    `memory_retrieval_limit` that won't blow past the model's context window.
+    """
+    import urllib.request
+    import urllib.error
+    body = json.dumps({"model": model}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{_ollama_base(host)}/api/show",
+        data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:
+        return {"error": f"HTTP {e.code}", "model": model}
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return {"error": f"network: {e!r}", "model": model}
+
+    info = data.get("model_info") or {}
+    details = data.get("details") or {}
+
+    # Ollama reports context length under architecture-specific keys.
+    # Scan common ones rather than hard-coding per-family.
+    context_length: int | None = None
+    for k, v in info.items():
+        if k.endswith("context_length") and isinstance(v, int):
+            context_length = v
+            break
+
+    return {
+        "model": model,
+        "context_length": context_length,
+        "family": details.get("family") or details.get("families", [None])[0],
+        "parameter_size": details.get("parameter_size"),
+        "quantization": details.get("quantization_level"),
+        "format": details.get("format"),
+    }
+
+
+def ollama_ensure_pulled(
+    model: str,
+    host: str | None = None,
+    auto_pull: bool = False,
+    timeout: float = 600.0,
+) -> tuple[bool, str]:
+    """Return (ready, status_message).
+
+    - (True, "already pulled") if the model is present
+    - (True, "pulled") if auto_pull=True and the pull succeeded
+    - (False, reason)  otherwise
+
+    By default auto_pull=False so we never silently trigger a multi-GB
+    download from a library function. The wizard / install script can
+    pass auto_pull=True explicitly.
+    """
+    pulled = ollama_list_pulled(host)
+    if not pulled and not reachable(Backend(provider="ollama")):
+        return (False, "ollama daemon not reachable")
+    if model in pulled:
+        return (True, "already pulled")
+    if not auto_pull:
+        return (False, f"model {model!r} not pulled (pass auto_pull=True or run: ollama pull {model})")
+
+    import urllib.request
+    import urllib.error
+    body = json.dumps({"model": model, "stream": False}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{_ollama_base(host)}/api/pull",
+        data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            # Pull returns a stream of JSON updates; last line has status
+            last = b""
+            for chunk in r:
+                if chunk.strip():
+                    last = chunk
+            try:
+                data = json.loads(last)
+            except json.JSONDecodeError:
+                data = {}
+            if data.get("status") == "success":
+                return (True, "pulled")
+            return (False, f"pull finished without success: {data}")
+    except urllib.error.HTTPError as e:
+        return (False, f"pull failed HTTP {e.code}")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return (False, f"pull failed: {e!r}")
+
+
+def recommended_context_budget(context_length: int | None) -> int:
+    """Conservative retrieval-memory count given a model's context window.
+
+    The brain uses this to cap memory_retrieval_limit when
+    BrainConfig.adapt_to_context=True. Rough rule: reserve ~1/3 of context
+    for memories + system prompt + tool catalog, assume ~300 tokens per
+    memory row.
+    """
+    if not context_length or context_length <= 0:
+        return 6  # safe default for unknown models
+    memory_budget_tokens = context_length // 3
+    per_memory_tokens = 300
+    return max(2, min(20, memory_budget_tokens // per_memory_tokens))
+
+
 # ---- CLI: mnemosyne-models ---------------------------------------------------
 
 def _main(argv: list[str] | None = None) -> int:
@@ -551,6 +687,11 @@ def _main(argv: list[str] | None = None) -> int:
 
     pg = sub.add_parser("ping", help="TCP reachability probe for one or all providers")
     pg.add_argument("provider", nargs="?", help="provider name, or omit to ping all")
+
+    sub.add_parser("pulled", help="list models already pulled into local Ollama")
+
+    ip = sub.add_parser("info", help="Ollama metadata for a model (context, family, quant)")
+    ip.add_argument("model", help="e.g. qwen3:8b, gemma4:e4b, qwen3.5:9b")
 
     args = p.parse_args(argv)
     cmd = args.cmd or "list"
@@ -610,6 +751,40 @@ def _main(argv: list[str] | None = None) -> int:
         if args.json:
             json.dump(results, sys.stdout, indent=2)
             print()
+        return 0
+
+    if cmd == "pulled":
+        names = ollama_list_pulled()
+        if args.json:
+            json.dump(names, sys.stdout, indent=2)
+            print()
+        else:
+            if not names:
+                print("(ollama not reachable or no models pulled)")
+            else:
+                for n in names:
+                    print(f"  {n}")
+        return 0
+
+    if cmd == "info":
+        info = ollama_model_info(args.model)
+        if args.json:
+            json.dump(info, sys.stdout, indent=2, default=str)
+            print()
+        else:
+            if info.get("error"):
+                print(f"error: {info['error']}")
+                return 4
+            print(f"model:            {info['model']}")
+            print(f"family:           {info.get('family') or '-'}")
+            print(f"parameter_size:   {info.get('parameter_size') or '-'}")
+            print(f"quantization:     {info.get('quantization') or '-'}")
+            print(f"format:           {info.get('format') or '-'}")
+            ctx = info.get("context_length")
+            print(f"context_length:   {ctx or '-'}")
+            if ctx:
+                budget = recommended_context_budget(ctx)
+                print(f"memory budget:    {budget}  (suggested memory_retrieval_limit for this context)")
         return 0
 
     return 2

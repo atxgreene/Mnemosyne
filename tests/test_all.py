@@ -37,6 +37,7 @@ import mnemosyne_identity as mid  # noqa: E402
 import mnemosyne_memory as mm  # noqa: E402
 import mnemosyne_models as mdls  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
+import mnemosyne_triage as tri  # noqa: E402
 import scenario_runner as sr  # noqa: E402
 
 
@@ -1294,6 +1295,190 @@ def _():
                 os.environ.pop("MNEMOSYNE_PROJECTS_DIR", None)
             else:
                 os.environ["MNEMOSYNE_PROJECTS_DIR"] = orig
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_triage (self-healing feedback loop)
+# =============================================================================
+
+def _seed_fake_runs_with_errors(pd: Path, n_runs: int = 3) -> list[str]:
+    """Create fake runs with a mix of ok/error events. Returns run_ids."""
+    run_ids: list[str] = []
+    for i in range(n_runs):
+        rid = ht.create_run(model="qwen3:8b", tags=["triage-test"], slug=f"fake{i}",
+                            projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            s.log("tool_call", tool="obsidian_search", status="ok", duration_ms=40.0)
+            s.log("tool_call", tool="obsidian_search", status="error",
+                  error={"type": "TimeoutError", "message": "vault unreachable"})
+            s.log("tool_call", tool="notion_search", status="error",
+                  error={"type": "HTTPError", "message": "401"})
+            s.log("identity_slip_detected", status="error",
+                  metadata={"slips": ["I am Claude"]})
+        ht.finalize_run(rid, metrics={"accuracy": 0.7}, projects_dir=pd)
+        run_ids.append(rid)
+    return run_ids
+
+
+@test("triage: clusters events by (event_type, tool, error_type)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        _seed_fake_runs_with_errors(pd, n_runs=2)
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        assert report.runs_scanned == 2
+        assert report.error_event_count >= 6  # 3 errors/run × 2 runs
+        # At least 3 distinct clusters: obsidian timeout, notion HTTP, identity slip
+        assert len(report.clusters) >= 3
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("triage: identity slips outrank tool errors on severity (blast_radius)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        _seed_fake_runs_with_errors(pd, n_runs=3)
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        # Find identity-slip cluster and a tool_call cluster
+        slip = next(c for c in report.clusters if c["event_type"] == "identity_slip_detected")
+        tool = next(c for c in report.clusters if c["event_type"] == "tool_call")
+        assert slip["severity"] > tool["severity"], \
+            f"slip sev {slip['severity']} should exceed tool sev {tool['severity']}"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("triage: cluster_id is stable across re-runs of same input")
+def _():
+    cid1 = tri._cluster_id_for("tool_call", "x", "TimeoutError")
+    cid2 = tri._cluster_id_for("tool_call", "x", "TimeoutError")
+    cid3 = tri._cluster_id_for("tool_call", "y", "TimeoutError")
+    assert cid1 == cid2
+    assert cid1 != cid3
+
+
+@test("triage: write_markdown_report produces a readable file")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        _seed_fake_runs_with_errors(pd, n_runs=2)
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        path = tri.write_markdown_report(report, projects_dir=pd)
+        assert path.exists()
+        body = path.read_text()
+        assert "Mnemosyne health report" in body
+        assert f"Grade: {report.health_grade}" in body
+        assert "identity_slip_detected" in body
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("triage: empty projects_dir yields grade A + 0 clusters")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        assert report.health_grade == "A"
+        assert report.clusters == []
+        assert report.error_event_count == 0
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("triage: severity_score returns all 6 sub-scores")
+def _():
+    c = tri.Cluster(cluster_id="x", event_type="tool_call", tool="t",
+                    error_type="E", events=[{"timestamp_utc": "2026-04-15T00:00:00.000Z"}])
+    c.last_seen_utc = c.events[0]["timestamp_utc"]
+    c.first_seen_utc = c.events[0]["timestamp_utc"]
+    s = tri.severity_score(c, {})
+    assert set(s["sub_scores"].keys()) == {
+        "frequency", "recency", "diversity", "blast_radius", "fix_age", "regression"
+    }
+    assert 0 <= s["severity"] <= 100
+
+
+# =============================================================================
+#  mnemosyne_models: local-model helpers
+# =============================================================================
+
+@test("models: recommended_context_budget scales with context window")
+def _():
+    assert mdls.recommended_context_budget(None) == 6
+    assert mdls.recommended_context_budget(0) == 6
+    assert mdls.recommended_context_budget(8192) >= 2
+    # Below saturation: bigger context → bigger budget
+    assert mdls.recommended_context_budget(8192) > mdls.recommended_context_budget(2048)
+    # Saturation at 20 (both 32K and 128K should be clamped there)
+    assert mdls.recommended_context_budget(1_000_000) == 20
+    assert mdls.recommended_context_budget(131072) == 20
+
+
+@test("models: ollama_list_pulled returns empty list when daemon unreachable")
+def _():
+    # Point at a port nothing listens on
+    names = mdls.ollama_list_pulled(host="http://localhost:1", timeout=0.5)
+    assert names == []
+
+
+@test("models: ollama_model_info returns error dict when unreachable")
+def _():
+    info = mdls.ollama_model_info("qwen3:8b", host="http://localhost:1", timeout=0.5)
+    assert "error" in info
+
+
+@test("models: ollama_ensure_pulled without auto_pull returns False when missing")
+def _():
+    ready, msg = mdls.ollama_ensure_pulled(
+        "totally-imaginary-model:v0",
+        host="http://localhost:1",
+        auto_pull=False,
+        timeout=0.5,
+    )
+    assert ready is False
+
+
+# =============================================================================
+#  brain: context adaptation for local models
+# =============================================================================
+
+@test("brain: adapt_to_context=False preserves configured retrieval limit")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+        chat_fn = _make_mock_chat([{"text": "ok", "tool_calls": []}])
+        cfg = br.BrainConfig(memory_retrieval_limit=6, adapt_to_context=False,
+                             inject_env_snapshot=False)
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn, config=cfg)
+        assert brain.config.memory_retrieval_limit == 6
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: adapt_to_context with unreachable Ollama keeps default")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "mem.db")
+        reg = sk.SkillRegistry()
+        chat_fn = _make_mock_chat([{"text": "ok", "tool_calls": []}])
+        # Backend pointing at an unreachable host — probe should fail silently
+        cfg = br.BrainConfig(
+            backend=mdls.Backend(provider="ollama", url="http://localhost:1/api/chat"),
+            memory_retrieval_limit=6,
+            adapt_to_context=True,
+            inject_env_snapshot=False,
+        )
+        brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn, config=cfg)
+        # Should have fallen back to the default without exception
+        assert brain.config.memory_retrieval_limit == 6
+        store.close()
     finally:
         shutil.rmtree(pd)
 
