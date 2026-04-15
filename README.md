@@ -2,16 +2,26 @@
 
 **A local-first, observable, identity-stable agent framework. Zero runtime deps. Stdlib only.**
 
-![demo](docs/demo.gif)
+![dashboard](docs/dashboard.png)
 
-One sentence: Mnemosyne is the substrate that makes local-first agent research cheap — ICMS 3-tier memory, 19 model backends, a Meta-Harness-aligned observability loop, and a 4-layer identity lock that holds whether the model inside is Qwen, Claude, GPT-4, or Gemini.
+One sentence: Mnemosyne is the substrate that makes local-first agent research cheap — ICMS 3-tier memory, 19 model backends, a Meta-Harness-aligned observability loop, an evolving avatar dashboard, and a 4-layer identity lock that holds whether the model inside is Qwen, Claude, GPT-4, or Gemini.
 
 ```sh
 git clone https://github.com/atxgreene/sturdy-doodle.git && cd sturdy-doodle
 pip install -e .
-./demo.sh                                  # 18-section end-to-end walkthrough, no network
-./demo-quick.sh                            # 45-second version (what the GIF shows)
+mnemosyne-serve --port 8484 &              # daemon + UI dashboard
+open http://127.0.0.1:8484/ui              # see avatar evolve in real time
+./demo.sh                                  # 18-section end-to-end walkthrough
 ```
+
+**Dashboard.** The UI ships with the serve daemon. The avatar visualization
+evolves deterministically from observable agent state — see
+[`docs/UI.md`](./docs/UI.md) for the visual contract (every property maps
+to one number you can grep out of `avatar.json`).
+
+| Resting | Active |
+|---|---|
+| ![rest](docs/avatar-rest.png) | ![active](docs/avatar-active.png) |
 
 ## Quickstart (10 lines)
 

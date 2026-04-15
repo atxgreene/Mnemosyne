@@ -249,6 +249,17 @@ class Service:
             return {"ok": True}
         raise HTTPError(400, f"unknown op {op!r}")
 
+    def handle_avatar(self) -> dict[str, Any]:
+        """Compute the current avatar state from telemetry + memory.
+
+        Pure read; the dashboard polls this every few seconds.
+        """
+        try:
+            import mnemosyne_avatar as av
+            return av.compute_state(projects_dir=self.pd)
+        except Exception as e:
+            return {"error": type(e).__name__, "message": str(e)}
+
     def handle_recent_events(self, limit: int) -> dict[str, Any]:
         import harness_telemetry as ht
         rd = ht.run_path(self.run_id, self.pd)
@@ -355,6 +366,19 @@ class Handler(BaseHTTPRequestHandler):
                 limit = int(query.get("limit", 50))
                 self._send_json(200, self.service.handle_recent_events(limit))
                 return
+            if method == "GET" and path == "/avatar":
+                self._send_json(200, self.service.handle_avatar())
+                return
+            if method == "GET" and path == "/events_stream":
+                self._stream_events()
+                return
+            if method == "GET" and (path == "/" or path == "/ui"
+                                      or path == "/ui/"):
+                self._serve_ui_index()
+                return
+            if method == "GET" and path.startswith("/ui/static/"):
+                self._serve_static(path)
+                return
             if method == "POST":
                 body = self._read_body()
                 if path == "/turn":
@@ -384,6 +408,122 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(e.code, {"error": e.msg})
         except Exception as e:
             self._send_json(500, {"error": type(e).__name__, "message": str(e)})
+
+    # ---- UI static + SSE helpers -------------------------------------------
+
+    _STATIC_TYPES = {
+        ".html": "text/html; charset=utf-8",
+        ".js":   "application/javascript; charset=utf-8",
+        ".css":  "text/css; charset=utf-8",
+        ".svg":  "image/svg+xml",
+        ".json": "application/json",
+        ".png":  "image/png",
+        ".ico":  "image/x-icon",
+    }
+
+    def _ui_root(self) -> Path:
+        return Path(__file__).resolve().parent / "mnemosyne_ui" / "static"
+
+    def _serve_ui_index(self) -> None:
+        index = self._ui_root() / "index.html"
+        if not index.is_file():
+            self._send_json(404, {"error": "ui not bundled"})
+            return
+        body = index.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_static(self, path: str) -> None:
+        rel = path[len("/ui/static/"):]
+        # Reject traversal
+        target = (self._ui_root() / rel).resolve()
+        try:
+            target.relative_to(self._ui_root())
+        except ValueError:
+            self._send_json(403, {"error": "forbidden"})
+            return
+        if not target.is_file():
+            self._send_json(404, {"error": "not found", "path": path})
+            return
+        ctype = self._STATIC_TYPES.get(target.suffix.lower(),
+                                          "application/octet-stream")
+        body = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _stream_events(self) -> None:
+        """Server-Sent Events feed of new events.jsonl rows.
+
+        Tails the current run's events.jsonl in 1-second polls. Cheap;
+        the file is append-only so we only need to remember last seek.
+        """
+        import harness_telemetry as ht
+        rd = ht.run_path(self.service.run_id, self.service.pd)
+        events_file = rd / "events.jsonl"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        # Initial backfill: last 20 lines so the UI doesn't start empty
+        try:
+            self.wfile.write(b": connected\n\n")
+            self.wfile.flush()
+        except Exception:
+            return
+
+        last_size = 0
+        if events_file.exists():
+            last_size = events_file.stat().st_size
+            try:
+                with events_file.open("rb") as f:
+                    f.seek(max(0, last_size - 8000))
+                    tail = f.read().decode("utf-8", errors="replace")
+                for line in tail.splitlines()[-20:]:
+                    line = line.strip()
+                    if line:
+                        self.wfile.write(b"data: " + line.encode("utf-8")
+                                            + b"\n\n")
+                        self.wfile.flush()
+            except Exception:
+                pass
+
+        # Poll loop
+        try:
+            while True:
+                if not events_file.exists():
+                    time.sleep(1.0)
+                    continue
+                size = events_file.stat().st_size
+                if size > last_size:
+                    with events_file.open("rb") as f:
+                        f.seek(last_size)
+                        chunk = f.read(size - last_size).decode(
+                            "utf-8", errors="replace")
+                    last_size = size
+                    for line in chunk.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        self.wfile.write(b"data: " + line.encode("utf-8")
+                                            + b"\n\n")
+                        self.wfile.flush()
+                else:
+                    # Heartbeat to keep the connection alive
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                time.sleep(1.0)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception:
+            return
 
     def do_GET(self) -> None:     # noqa: N802
         self._dispatch("GET")

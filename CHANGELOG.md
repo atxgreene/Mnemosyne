@@ -2,6 +2,92 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.3.0] — 2026-04-15 — interactive UI dashboard + evolving avatar
+
+The agent gets a face. A browser dashboard served by `mnemosyne-serve`
+shows a live SVG avatar that visualizes the agent's state, plus a
+chat panel, live event stream, memory tier bars, and goal management.
+
+The avatar is the headline feature. It's not a personality engine —
+it's a deterministic visualization of observable agent state. Every
+visual property maps to one integer or float in `avatar.json` derived
+from `memory.db` + `events.jsonl` + `goals.jsonl`. See `docs/UI.md`
+for the full visual contract.
+
+**New modules:**
+
+- `mnemosyne_avatar.py` — derives a versioned avatar state dict.
+  Schema v1 fields cover memory tiers, identity strength, dream count,
+  inner-dialogue activations, goal stats, palette (auto-derived from
+  health × activity), mood phase (rest/focus/explore/consolidate),
+  aura radius, ring count, pulse rate. Reserved-but-null slots for
+  `wisdom` / `restlessness` / `novelty` / `self_assessment` keep the
+  schema future-additive without breaking older snapshots.
+- `mnemosyne_ui/static/` — single-page dashboard. `index.html`,
+  `style.css` (responsive grid, dark theme, system fonts only),
+  `avatar.js` (SVG renderer mirroring the server-side render exactly,
+  with SMIL animations for breathing aura + orbiter rotation +
+  consolidate-mode petals), `app.js` (polls /avatar /stats /goals,
+  subscribes to /events_stream via SSE, posts /turn /goals).
+
+**`mnemosyne_serve` extensions:**
+
+- `GET /ui` → static HTML
+- `GET /ui/static/*` → static asset (CSS/JS/SVG, traversal-rejected)
+- `GET /avatar` → current `compute_state()` JSON
+- `GET /events_stream` → Server-Sent Events tail of the run's
+  `events.jsonl`. Falls back to polling when an auth token is set
+  (EventSource can't carry custom headers).
+
+**New CLI:**
+
+- `mnemosyne-avatar state` → print state JSON
+- `mnemosyne-avatar render-svg --out f.svg --size 500` → standalone
+  animated SVG, useful for docs and headless screenshots
+
+**Docs:**
+
+- `docs/UI.md` — visual contract, schema versioning, security model,
+  endpoint table, future-facing roadmap
+- `docs/dashboard.png` — composed dashboard reference (full layout)
+- `docs/avatar-rest.png` / `docs/avatar-active.png` — paired examples
+  showing the same avatar in idle vs. busy state
+- `docs/avatar-rest.svg` / `docs/avatar-active.svg` — animated SVG
+  versions (renderable in any browser)
+
+**Packaging:**
+
+- 18th console script (`mnemosyne-avatar`)
+- `mnemosyne_avatar` module added to `py-modules`
+- `mnemosyne_ui/static/*` added to package-data so the dashboard
+  ships with `pip install -e .`
+- Version bumped 0.2.0 → 0.3.0
+
+**Tests:** 182 → 189 green. 7 new covering empty/baseline state,
+identity-slip drag on health, dream + inner-dialogue surfacing,
+snapshot round-trip, SVG render output, mood-phase priority logic,
+memory tier reflection. pyflakes clean.
+
+**AGI-scaling design (deliberately additive):**
+
+- Avatar state schema is versioned. New traits join under the same
+  `schema_version`; existing UI keeps rendering older snapshots.
+- Reserved null-valued slots for traits we'll compute later
+  (`wisdom`, `restlessness`, `novelty`, `self_assessment`).
+- Avatar state is *derived* from observable agent data, not stored
+  independently. Truth lives in events.jsonl + memory.db; the
+  snapshot is a cache the UI reads.
+- Future: bidirectional avatar (state signals back into agent
+  config), habitat visualization (per-skill objects), inter-agent
+  visibility — all gated behind doc/UI.md "Future-facing extensions".
+
+**Known limitations:**
+
+- High-concurrency telemetry writes (>2 workers writing many events
+  per second) can occasionally drop events. Tracked separately;
+  doesn't affect normal interactive use. Tests run at workers=2 to
+  avoid the race.
+
 ## [0.2.0] — 2026-04-15 — v1.2 rigor pass + architectural primitives
 
 ### v1.2.3 — Hermes-port: extended tool-call parsers + builtin skill library
