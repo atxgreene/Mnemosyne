@@ -390,6 +390,7 @@ PY
 head1 '14/18  Apply-agent — closes the Meta-Harness loop'
 # ==============================================================================
 head2 'Mark one identity proposal as accepted, then run mnemosyne-apply'
+# shellcheck disable=SC2012  # ls is fine for a controlled demo dir; no spaces
 PROP=$(ls -1t "$DEMO_PROJECTS"/proposals/PROP-*identity*.md 2>/dev/null | head -1)
 if [ -n "$PROP" ]; then
   python3 -c "

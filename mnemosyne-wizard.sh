@@ -887,6 +887,7 @@ if tui_yesno "Launch dashboard?" \
       printf 'note: serve did not come up cleanly; tail /tmp/mnemosyne-serve.log\n' >&2
     fi
   else
+    # shellcheck disable=SC2016  # we want literal $PATH in the user message
     printf 'note: mnemosyne-serve not on $PATH; activate the venv first:\n' >&2
     printf '  source %s/.venv/bin/activate\n' "$MNEMOSYNE_PROJECTS_DIR" >&2
     printf '  mnemosyne-serve\n' >&2

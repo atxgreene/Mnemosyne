@@ -2,6 +2,43 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.3.4] — 2026-04-15 — fix CI failures (shellcheck + install-smoke surface)
+
+CI was failing across the day because:
+
+  1. **shellcheck** caught three real lint issues introduced by recent
+     work: an unquoted `$(find …)` expansion in `demo-quick.sh`, a
+     glob `ls -1t` in `demo.sh`, and a literal `$PATH` in a
+     single-quoted `printf` string in `mnemosyne-wizard.sh`.
+  2. **install-smoke** still reported success because the hardcoded
+     entry-point list only checked the v0.1 stable surface; the new
+     12 entry points + 11 new modules + 4 UI assets weren't covered,
+     so a regression on any of those would have slipped through
+     unnoticed (no failing test, but no coverage either).
+
+Both fixed:
+
+- shellcheck issues addressed inline (1 quote-bypass directive for the
+  controlled-input case, 1 ls-vs-find directive for the demo-only
+  glob, 1 expansion-suppression for the literal `$PATH` text).
+- `.github/workflows/ci.yml` install-smoke job now exercises:
+    * 20 entry points (was 8): all of v0.1 + the 12 added since v0.2
+    * 20+ library surfaces: every shipped public API
+    * UI static assets ship with the package (4 files)
+
+Verified locally — all 6 CI phases pass:
+  Phase 1a (AST):          all .py parse
+  Phase 1b (pyflakes):     clean
+  Phase 2  (shellcheck):   clean
+  Phase 3  (unit):         200/200
+  Phase 4  (integration):  29/29
+  Phase 5  (install-smoke): 20/20 entry points + all library surfaces
+                            + all 4 UI assets present
+  Phase 6  (triage-demo):  health report written
+
+No code changes outside the three shellcheck fixes. Version bump
+0.3.3 → 0.3.4 to mark the CI-clean cut.
+
 ## [0.3.3] — 2026-04-15 — safety hardening + memory browser panel
 
 Security and transparency improvements. The daemon is now safe to

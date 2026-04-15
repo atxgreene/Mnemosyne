@@ -116,6 +116,7 @@ dim "  python3 tests/test_all.py"
 python3 /home/user/sturdy-doodle/tests/test_all.py 2>&1 | tail -1 | sed 's/^/  /'
 pause 0.4
 dim "  python3 -m pyflakes *.py"
+# shellcheck disable=SC2046  # find output is path-safe; project has no spaces
 python3 -m pyflakes $(find /home/user/sturdy-doodle -maxdepth 1 -name '*.py') 2>&1 \
     && printf '  \033[1;32m✓\033[0m pyflakes clean\n' \
     || printf '  ✗ pyflakes found issues\n'

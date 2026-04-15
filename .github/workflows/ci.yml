@@ -98,15 +98,23 @@ jobs:
           python3 -m venv /tmp/ci-venv
           /tmp/ci-venv/bin/pip install --quiet --upgrade pip
           /tmp/ci-venv/bin/pip install -e .
-      - name: Verify entry points land on $PATH
+      - name: Verify all 20 entry points land on $PATH
         run: |
+          # Stable v0.2.x surface
           for cmd in mnemosyne-experiments mnemosyne-pipeline \
                     mnemosyne-models mnemosyne-memory \
                     environment-snapshot obsidian-search notion-search \
-                    harness-telemetry; do
+                    harness-telemetry mnemosyne-triage; do
             [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
           done
-          echo "all 8 entry points installed"
+          # v0.2.0+ rigor pass
+          for cmd in mnemosyne-proposer mnemosyne-dreams mnemosyne-apply \
+                    mnemosyne-scengen mnemosyne-goals mnemosyne-mcp \
+                    mnemosyne-serve mnemosyne-train mnemosyne-batch \
+                    mnemosyne-datagen mnemosyne-avatar; do
+            [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
+          done
+          echo "all 20 entry points installed"
       - name: Verify library imports without sys.path shims
         run: |
           /tmp/ci-venv/bin/python3 -c "
@@ -117,7 +125,30 @@ jobs:
           from mnemosyne_skills import SkillRegistry, record_learned_skill
           from mnemosyne_identity import enforce_identity, MNEMOSYNE_IDENTITY
           from mnemosyne_triage import run_triage, write_markdown_report
-          print('all 8 library surfaces import cleanly')
+          # v0.2.x+ library surfaces
+          from mnemosyne_proposer import propose
+          from mnemosyne_dreams import consolidate
+          from mnemosyne_inner import deliberate, DEFAULT_TRIGGER_TAGS
+          from mnemosyne_apply import apply_proposal, apply_all_accepted
+          from mnemosyne_goals import GoalStack, goals_system_block
+          from mnemosyne_avatar import compute_state, render_svg
+          from mnemosyne_batch import run_batch, Prompt
+          from mnemosyne_datagen import generate_prompts, expand_template
+          from mnemosyne_train import export, compress_one, deploy
+          from mnemosyne_tool_parsers import parse_any, strip_tool_calls
+          from mnemosyne_skills_builtin import register_builtin_skills
+          from mnemosyne_mcp import MCPClient, serve_stdio
+          print('all 20+ library surfaces import cleanly')
+          "
+      - name: Verify UI static assets ship with the package
+        run: |
+          /tmp/ci-venv/bin/python3 -c "
+          from pathlib import Path
+          import mnemosyne_serve as ms
+          ui = Path(ms.__file__).resolve().parent / 'mnemosyne_ui' / 'static'
+          for f in ('index.html', 'app.js', 'avatar.js', 'style.css'):
+              assert (ui / f).is_file(), f'missing UI asset: {f}'
+          print('all 4 UI assets ship with the package')
           "
 
   # ─── Phase 6 ───────────────────────────────────────────────────────────────
