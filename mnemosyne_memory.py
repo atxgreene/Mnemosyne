@@ -133,6 +133,16 @@ def _check_fts5(conn: sqlite3.Connection) -> bool:
         return False
 
 
+# Module-level lock: concurrent CREATE VIRTUAL TABLE USING fts5 on the
+# same DB file can fail with "vtable constructor failed: memories_fts"
+# even with busy_timeout, because FTS5 module registration isn't
+# coordinated across connections. Serialize schema init across threads
+# in one process. Different processes are still vulnerable; users who
+# parallelize across processes should `mnemosyne-memory stats` once
+# before spawning workers to pre-create the schema.
+_SCHEMA_INIT_LOCK = threading.Lock()
+
+
 class MemoryStore:
     """SQLite-backed memory with optional FTS5 acceleration and ICMS tiering.
 
@@ -158,6 +168,10 @@ class MemoryStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Wait up to 5s for a competing writer before raising
+        # "database is locked". Concurrent MemoryStore opens on the
+        # same DB otherwise race on schema-init DDL.
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._has_fts5 = _check_fts5(self._conn)
         self._telemetry = telemetry
         self._init_schema()
@@ -165,7 +179,10 @@ class MemoryStore:
     # ---- schema / migrations ------------------------------------------------
 
     def _init_schema(self) -> None:
-        with self._lock:
+        # The outer _SCHEMA_INIT_LOCK serializes DDL across MemoryStore
+        # instances on the same interpreter. Per-instance _lock still
+        # guards transactional semantics of the shared _conn object.
+        with _SCHEMA_INIT_LOCK, self._lock:
             self._conn.executescript("""
                 CREATE TABLE IF NOT EXISTS schema_meta (
                     key TEXT PRIMARY KEY,

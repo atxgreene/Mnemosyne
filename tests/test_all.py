@@ -2955,14 +2955,11 @@ def _():
                                        capture_for_training=True),
             )
 
-        # workers=2 stays within the telemetry layer's robust-write
-        # envelope. Bumping past 2 occasionally surfaces a known
-        # write-loss race in harness_telemetry under heavy MemoryStore
-        # contention — tracked separately. This test asserts the batch
-        # runner contract (all prompts dispatched + counted), not the
-        # telemetry layer's parallel-write guarantee.
+        # workers=4 is safe now that MemoryStore has a 5s busy_timeout
+        # and batch.retryable() treats "database is locked" as
+        # transient. Before v0.3.1 this produced an occasional drop.
         summary = batch_mod.run_batch(
-            prompts, brain_factory=factory, workers=2, projects_dir=pd,
+            prompts, brain_factory=factory, workers=4, projects_dir=pd,
             tags=["unit-test"], progress_every=1000,
         )
         assert summary.prompts_total == 8
@@ -3037,6 +3034,66 @@ def _():
         assert attempts["hello"] == 2  # 1 failure + 1 success
     finally:
         shutil.rmtree(pd)
+
+
+# =============================================================================
+#  regression: concurrent MemoryStore opens + FTS5 race guard
+# =============================================================================
+
+@test("memory: 12 concurrent MemoryStore opens on same DB succeed")
+def _():
+    """Regression for v0.3.1 — pre-fix this raced on
+    'vtable constructor failed: memories_fts' and 'database is locked'.
+    """
+    import threading as _th
+    pd = _tmp_projects_dir()
+    try:
+        errors: list[str] = []
+        elock = _th.Lock()
+
+        def worker(tid):
+            try:
+                store = mm.MemoryStore(path=pd / "shared.db")
+                for i in range(8):
+                    store.write(content=f"t{tid}-i{i}",
+                                  kind="fact", tier=mm.L2_WARM)
+                # Full-text search path
+                hits = store.search(f"t{tid}", limit=8)
+                assert len(hits) >= 8, f"tid={tid} got {len(hits)}"
+                store.close()
+            except Exception as e:
+                with elock:
+                    errors.append(f"t{tid}: {type(e).__name__}: {e}")
+
+        threads = [_th.Thread(target=worker, args=(i,)) for i in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == [], errors
+
+        # Every row landed despite concurrency
+        store = mm.MemoryStore(path=pd / "shared.db")
+        stats = store.stats()
+        assert stats["total"] == 12 * 8
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("batch: _retryable recognizes sqlite transient errors")
+def _():
+    # Positive cases
+    for msg in (
+        "database is locked",
+        "vtable constructor failed: memories_fts",
+        "HTTP 503 service unavailable",
+        "Request timed out",
+    ):
+        assert batch_mod._retryable(Exception(msg)), msg
+    # Negative cases
+    for msg in ("file not found", "permission denied", "bad json"):
+        assert not batch_mod._retryable(Exception(msg)), msg
 
 
 # =============================================================================

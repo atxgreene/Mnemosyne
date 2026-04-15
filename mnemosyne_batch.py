@@ -158,6 +158,10 @@ def _retryable(exc: Exception) -> bool:
     return any(s in msg for s in (
         "timeout", "timed out", "503", "502", "429",
         "connection reset", "connection refused",
+        # SQLite transient busy state — happens when many MemoryStore
+        # instances open the same DB in parallel and race on DDL.
+        "database is locked", "database table is locked",
+        "vtable constructor failed",  # FTS5 race on CREATE VIRTUAL TABLE
     ))
 
 

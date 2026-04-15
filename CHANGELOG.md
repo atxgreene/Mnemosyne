@@ -2,6 +2,43 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.3.1] — 2026-04-15 — fix concurrent MemoryStore race
+
+Two races surface under heavy batch-runner concurrency (`workers > 2`)
+when many MemoryStore instances open the same DB file at once:
+
+  1. `database is locked` during simultaneous schema-init DDL
+  2. `vtable constructor failed: memories_fts` during simultaneous
+     CREATE VIRTUAL TABLE USING fts5
+
+Both fixed:
+
+- `mnemosyne_memory.MemoryStore.__init__` now sets
+  `PRAGMA busy_timeout=5000`, so SQLite waits 5s instead of failing
+  immediately on lock contention.
+- `mnemosyne_memory` adds a module-level `_SCHEMA_INIT_LOCK` that
+  serializes DDL across all MemoryStore instances in one interpreter.
+  FTS5 vtable construction is not coordinated across SQLite
+  connections at the driver level; we coordinate in Python.
+- `mnemosyne_batch._retryable()` now treats both transient signatures
+  (`database is locked`, `vtable constructor failed`) as retry-worthy,
+  so the batch runner self-heals when the bottom-of-stack glitch
+  leaks through.
+
+Verified: 40/40 concurrent 4-worker 8-prompt batches succeed (was
+~85% before). Full test suite 15/15 stable (was ~70%). Added
+regression: `memory: 12 concurrent MemoryStore opens on same DB
+succeed` and `batch: _retryable recognizes sqlite transient errors`.
+
+Tests: 189 → 191 green. pyflakes clean.
+
+Multi-process parallelism is a separate concern — different processes
+don't share `_SCHEMA_INIT_LOCK`. The mitigation for now is to run
+`mnemosyne-memory stats` once on a fresh install so the schema is
+pre-created before `mnemosyne-batch` spawns workers. A
+cross-process fix (filesystem lock file) is tracked for a later
+release.
+
 ## [0.3.0] — 2026-04-15 — interactive UI dashboard + evolving avatar
 
 The agent gets a face. A browser dashboard served by `mnemosyne-serve`
