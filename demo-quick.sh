@@ -25,7 +25,7 @@ cat <<'BANNER'
 
    ╔═══════════════════════════════════════════════════╗
    ║   Mnemosyne — local-first agent framework         ║
-   ║   v0.2.1 — observable, tunable, identity-stable   ║
+   ║   v0.3.5 — observable, tunable, identity-stable   ║
    ╚═══════════════════════════════════════════════════╝
 
 BANNER
@@ -109,8 +109,26 @@ dim "  first trajectory (Hermes-compatible schema):"
 head -1 /tmp/gif-trajs.jsonl | python3 -m json.tool | head -18 | sed 's/^/  /'
 pause 1.5
 
-# ---- 5. tests ---------------------------------------------------------------
-say "5.  Verify: 156 unit tests, pyflakes clean, pip-installable"
+# ---- 5. resolver audit ------------------------------------------------------
+say "5.  Resolver audit — every skill is reachable + distinguishable"
+hr
+mnemosyne-resolver check 2>&1 | head -8 | sed 's/^/  /' || true
+pause 1.6
+
+# ---- 6. avatar dashboard ----------------------------------------------------
+say "6.  Avatar dashboard — agent state visualized at /ui"
+hr
+dim "  mnemosyne-serve  → http://127.0.0.1:8484/ui"
+dim "    rest          focus         consolidate     explore"
+dim "    ●               ◉             ✺             ◍"
+printf '  \033[1;36mLive avatar:\033[0m breathing aura · inner-dialogue rings · scars\n'
+printf '  \033[1;36mMemory tiers:\033[0m L1 hot · L2 warm · L3 cold\n'
+printf '  \033[1;36mAGI traits:\033[0m wisdom · restlessness · novelty · self-assessment\n'
+printf '  \033[1;36mPanels:\033[0m chat · live events (SSE) · goals · memory browser\n'
+pause 2
+
+# ---- 7. tests ---------------------------------------------------------------
+say "7.  Verify: 213 unit tests, pyflakes clean, 21 console scripts, stdlib core"
 hr
 dim "  python3 tests/test_all.py"
 python3 /home/user/sturdy-doodle/tests/test_all.py 2>&1 | tail -1 | sed 's/^/  /'
@@ -127,8 +145,8 @@ printf '\n\033[1;35m'
 cat <<'BANNER'
    ───────────────────────────────────────────────────
          github.com/atxgreene/sturdy-doodle
-         docs/ROADMAP.md · docs/BENCHMARKS.md
-         156/156 tests · 15 console scripts · stdlib-only core
+         v0.3.5 · 213/213 tests · 21 console scripts
+         dashboard at http://127.0.0.1:8484/ui
    ───────────────────────────────────────────────────
 BANNER
 printf '\033[0m\n'
