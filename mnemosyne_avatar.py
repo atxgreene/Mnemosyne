@@ -387,12 +387,84 @@ def _compute_self_assessment(
 
 # ---- main entry point ---------------------------------------------------
 
+# Tiny cache so the dashboard's 4s poll doesn't re-scan all of
+# events.jsonl + memory.db when nothing has changed. Keyed on a
+# fingerprint of file mtimes (memory.db, goals.jsonl, every
+# events.jsonl). Bypassed when projects_dir or window changes.
+_STATE_CACHE: dict[tuple, tuple[float, dict[str, Any]]] = {}
+_STATE_CACHE_MAX_AGE_S = 30.0
+
+
+def _state_fingerprint(pd: Path) -> tuple:
+    """Stable token that changes when any agent state file changes.
+
+    Cheap: stat() on a small set of files. We do NOT walk into
+    events.jsonl line counts — mtime resolution is enough.
+    """
+    parts: list[tuple[str, float]] = []
+    for name in ("memory.db", "goals.jsonl"):
+        f = pd / name
+        if f.exists():
+            parts.append((name, f.stat().st_mtime))
+    exp = pd / "experiments"
+    if exp.is_dir():
+        for run_dir in exp.iterdir():
+            if run_dir.is_symlink() or not run_dir.is_dir():
+                continue
+            ef = run_dir / "events.jsonl"
+            if ef.exists():
+                parts.append((run_dir.name, ef.stat().st_mtime))
+    return tuple(parts)
+
+
 def compute_state(
     *,
     projects_dir: Path | None = None,
     window_minutes: int = 60,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
-    """Compute the current avatar state. Pure read; no side effects."""
+    """Compute the current avatar state. Pure read; no side effects.
+
+    With `use_cache=True` (default), repeat calls within 30 seconds
+    that see no file-mtime changes return the cached value. The
+    dashboard polls every 4s; this drops state computation to a
+    handful of stat() syscalls when nothing has changed.
+
+    Pass `use_cache=False` for benchmarks or when you suspect a stale
+    cache (e.g. external writes to memory.db).
+    """
+    pd_actual = projects_dir or _default_projects_dir()
+    if use_cache:
+        fp = _state_fingerprint(pd_actual)
+        cache_key = (str(pd_actual), window_minutes, fp)
+        cached = _STATE_CACHE.get(cache_key)
+        if cached is not None:
+            cached_at, state = cached
+            from time import monotonic as _mono
+            if (_mono() - cached_at) < _STATE_CACHE_MAX_AGE_S:
+                return state
+    state = _compute_state_fresh(projects_dir=pd_actual,
+                                    window_minutes=window_minutes)
+    if use_cache:
+        from time import monotonic as _mono
+        _STATE_CACHE[cache_key] = (_mono(), state)
+        # Bound the cache so a long-running daemon doesn't accumulate
+        # entries from many distinct (projects_dir, window) callers.
+        if len(_STATE_CACHE) > 64:
+            # Drop the oldest half — simplest LRU
+            for k in sorted(_STATE_CACHE,
+                              key=lambda k: _STATE_CACHE[k][0])[:32]:
+                _STATE_CACHE.pop(k, None)
+    return state
+
+
+def _compute_state_fresh(
+    *,
+    projects_dir: Path | None = None,
+    window_minutes: int = 60,
+) -> dict[str, Any]:
+    """Internal: always recomputes; no cache. The cached `compute_state`
+    delegates here on a cache miss."""
     pd = projects_dir or _default_projects_dir()
     mem = _read_memory_stats(pd / "memory.db")
     evt = _scan_recent_events(pd / "experiments", window_minutes)

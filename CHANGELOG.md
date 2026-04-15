@@ -2,6 +2,102 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.4.0] — 2026-04-15 — PyPI-ready + security audit + perf
+
+First release intended for `pip install mnemosyne-harness` (when
+the maintainer cuts the PyPI upload). Three substantive passes since
+v0.3.5: packaging polish, full security audit with one fix shipped,
+and a 389× speedup on the dashboard's hot path.
+
+### Packaging — PyPI ready
+
+- `LICENSE` (MIT) added at repo root.
+- `pyproject.toml` polished: license metadata, OS classifiers, Python
+  3.13 added, expanded keywords, full `[project.urls]` table covering
+  Homepage / Repository / Documentation / Issues / Changelog /
+  Quickstart / Architecture / Roadmap / Benchmarks.
+- `mnemosyne_ui/__init__.py` added so the dashboard's static assets
+  ship as `package_data`. Verified: `unzip -l mnemosyne_harness-*.whl`
+  shows `mnemosyne_ui/static/{index.html,app.js,avatar.js,style.css}`
+  bundled; `mnemosyne-serve` resolves the UI via `mnemosyne_ui.__file__`
+  so wheel installs work without source-tree access.
+- `mnemosyne_serve._ui_root` now resolves through the `mnemosyne_ui`
+  package (with editable-install fallback).
+- Built artifacts verified: both `mnemosyne_harness-0.4.0-py3-none-any.whl`
+  and `mnemosyne-harness-0.4.0.tar.gz` pass `twine check`.
+- `RELEASE.md` added with the exact 10-step `twine upload` procedure +
+  TestPyPI dry-run + GitHub release tagging.
+- `docs/QUICKSTART.md` added — 10-line "first conversation" tutorial
+  from `pip install` to seeing the avatar move.
+
+### Security audit (full SECURITY.md)
+
+Categories swept across the entire codebase via grep + manual review.
+**Clean:** no `shell=True` outside the documented allow-list, no
+`eval`/`exec`/`pickle`/`os.system`, every `urlopen()` has a timeout,
+zero SQL injection vectors (all queries parameterized), every file
+`open()` declares encoding, atomic writes everywhere, constant-time
+token compare, 1 MiB POST-body cap, path traversal guarded.
+
+**One real issue found and fixed:**
+
+  - **SSRF in `http_get` / `web_fetch_text`** (`mnemosyne_skills_builtin`).
+    `urllib.request.urlopen` follows redirects to ANY address by
+    default — a model could be tricked into fetching
+    `http://169.254.169.254/` (cloud metadata) or
+    `http://127.0.0.1:11434/` (Ollama). Fixed:
+      * Hostname resolved before the request fires; private /
+        loopback / link-local / reserved / multicast / unspecified
+        addresses refused
+      * Custom `_NoRedirectHandler` blocks redirect-following entirely
+        (3xx returned as-is so caller decides)
+      * `allow_private=True` available for tests; never exposed to
+        model-callable surfaces
+
+  4 new tests covering SSRF blocks for loopback, RFC1918, cloud
+  metadata, malformed URLs.
+
+`docs/SECURITY.md` published with full audit findings, defenses,
+hardening guide for production, and known limitations (cross-process
+schema race + unbounded JSONL line length both documented as v0.4+
+candidates).
+
+### Performance — 389× faster dashboard
+
+- **`mnemosyne_avatar.compute_state` now caches.** The dashboard polls
+  every 4s; before this fix every poll re-scanned all events.jsonl
+  files in the experiments dir (~26ms median, growing linearly with
+  history). Now keyed on a fingerprint of file mtimes (memory.db,
+  goals.jsonl, every events.jsonl). Cache hit returns the previous
+  state in ~0.12ms.
+- Cache is bounded (max 64 entries, LRU), 30s max age, opt-out via
+  `compute_state(use_cache=False)` for benchmarks.
+- 2 regression tests: cache-hit returns the same dict object;
+  fingerprint change bypasses cache; `use_cache=False` always
+  recomputes.
+
+### Tests + verification
+
+- 216 → 218 unit tests, all green.
+- pyflakes clean.
+- shellcheck clean.
+- Full PyPI build pipeline verified locally:
+  `twine check dist/*` → both artifacts PASS.
+- Wheel install + UI smoke: `pip install mnemosyne_harness-*.whl` in
+  a clean venv, `_ui_root` resolves to
+  `<site-packages>/mnemosyne_ui/static/`, `index.html` present.
+
+### What's next (post-v0.4.0)
+
+Tracked in `docs/ROADMAP.md`:
+- Live-LLM end-to-end test (everything currently uses mock chat_fn)
+- Bidirectional avatar (state signals back into agent config)
+- Cross-process schema lock for multi-process MemoryStore
+- Resolver auto-suggest (model rewrites weak descriptions)
+- Goal-pursuit cron in `mnemosyne-serve`
+
+Version bumped 0.3.5 → 0.4.0 to mark the first PyPI-ready cut.
+
 ## [0.3.5] — 2026-04-15 — routing-layer audit (Tan "Resolvers" 2026)
 
 Inspired by Garry Tan's "Resolvers: The Routing Table for Intelligence"

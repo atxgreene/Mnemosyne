@@ -97,6 +97,21 @@ accept* but which we have not implemented.
 
 ---
 
+## Concrete next-steps after v0.4.0
+
+In rough order of impact-per-effort (tier 1 first):
+
+| Item | Why it matters | Effort |
+|---|---|---|
+| **Live-LLM end-to-end test** | All 218 tests use mocked `chat_fn`. The framework's main job is unproven against a real model. Run one Ollama-backed conversation, verify identity lock, measure wrapper overhead in the wild, record a real-model GIF. | ~half day with Ollama running |
+| **Cross-process schema lock** | `_SCHEMA_INIT_LOCK` only serializes within one interpreter. Two processes (e.g. `mnemosyne-serve` + a `mnemosyne-batch` job) can still race on FTS5 vtable creation. Filesystem `flock` would close it. | ~2 hours |
+| **Bidirectional avatar** | Today the avatar visualizes agent state. Reverse it: low health → reduce `memory_retrieval_limit`; high wisdom → expand memory ceiling; consolidate mood → pause new turns until dreams catch up. Closes a loop the existing UI doesn't. | ~half day |
+| **Resolver auto-suggest** | `mnemosyne-resolver check` flags weak descriptions. `mnemosyne-resolver suggest` would call the local model to propose better ones. Closes the audit loop. | ~half day |
+| **Goal-pursuit cron** | Daemon background job: every N hours, run inner-dialogue against open goals, propose next steps, log them as candidate turns. Surfaces in dashboard. Makes the agent proactive instead of purely reactive. | ~1 day |
+| **JSONL rotation** | Agent at 200 turns/day generates ~55 MB/year in events.jsonl. No rotation today. Add `mnemosyne-experiments rotate --keep-days N` and a daemon cron. | ~3 hours |
+| **TelemetrySession persistent file handle** | Profile shows 24μs per `log()` call due to open/close per write. For batch runs that's the bottleneck. Keep handle open between writes; flush on N-event boundaries. | ~2 hours |
+| **GitHub release + PyPI publish** | The `0.4.0` artifacts are built and `twine check`-clean. Cut a tag, push to PyPI, write a GitHub release with the v0.4.0 CHANGELOG. | ~30 min once you have credentials |
+
 ## Aspirational (on the list, not yet scoped)
 
 - **Behavioral coupling**: two Mnemosyne instances negotiating over a

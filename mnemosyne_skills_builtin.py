@@ -185,18 +185,75 @@ def grep_code(pattern: str, *, root: str | None = None,
     return {"matches": matches, "truncated": False}
 
 
+# SSRF defense: refuse to fetch URLs whose hostname resolves to a
+# private, loopback, link-local, or reserved address. Stops a model
+# (or a malicious redirect chain) from being weaponized to probe
+# Ollama, cloud metadata services (169.254.169.254 — AWS/GCP), or
+# internal RFC1918 networks.
+import ipaddress as _ipaddress
+import socket as _socket
+
+
+def _is_private_address(host: str) -> bool:
+    """Resolve `host` to an IP and return True if any resolved address
+    is loopback / private / link-local / reserved."""
+    try:
+        infos = _socket.getaddrinfo(host, None)
+    except _socket.gaierror:
+        return True   # can't resolve = refuse, fail-safe
+    for fam, _t, _p, _c, sockaddr in infos:
+        addr = sockaddr[0]
+        try:
+            ip = _ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return True
+    return False
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse to follow redirects. Caller must handle 3xx explicitly,
+    so a redirect to an internal address never silently lands."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code,
+            f"redirect to {newurl!r} refused (mnemosyne SSRF defense)",
+            headers, fp,
+        )
+
+
 def http_get(url: str, *, timeout: float = 10.0,
-             max_bytes: int = 2_000_000) -> dict[str, Any]:
-    """Read-only HTTP GET with bounded timeout + size + no cross-host
-    redirects. Returns {status, content_type, text, truncated}."""
+             max_bytes: int = 2_000_000,
+             allow_private: bool = False) -> dict[str, Any]:
+    """Read-only HTTP GET with bounded timeout + size + SSRF defense.
+
+    By default refuses URLs whose hostname resolves to a private,
+    loopback, link-local, or reserved IP. Set `allow_private=True` to
+    fetch from `localhost` / RFC1918 / cloud-metadata addresses
+    (intended only for tests; never expose this flag to untrusted
+    callers).
+
+    Redirects are NOT followed — a 3xx response is returned as-is so
+    the caller decides whether the new location is safe.
+
+    Returns {status, content_type, text, truncated}.
+    """
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return {"error": f"scheme {parsed.scheme!r} not allowed"}
+    if not parsed.hostname:
+        return {"error": "no hostname in url"}
+    if not allow_private and _is_private_address(parsed.hostname):
+        return {"error": "refusing to fetch private/loopback address",
+                "hostname": parsed.hostname}
     req = urllib.request.Request(
-        url, headers={"User-Agent": "mnemosyne/0.2.2 (read-only agent)"}
+        url, headers={"User-Agent": "mnemosyne/0.3.5 (read-only agent)"}
     )
+    opener = urllib.request.build_opener(_NoRedirectHandler())
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with opener.open(req, timeout=timeout) as r:
             body = r.read(max_bytes + 1)
             truncated = len(body) > max_bytes
             if truncated:
@@ -211,7 +268,8 @@ def http_get(url: str, *, timeout: float = 10.0,
                 "truncated": truncated,
             }
     except urllib.error.HTTPError as e:
-        return {"error": "HTTPError", "status": e.code, "url": url}
+        return {"error": "HTTPError", "status": e.code, "url": url,
+                "message": str(e)}
     except urllib.error.URLError as e:
         return {"error": "URLError", "reason": str(e.reason), "url": url}
     except Exception as e:

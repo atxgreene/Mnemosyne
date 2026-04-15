@@ -1,23 +1,32 @@
 # Mnemosyne
 
-**A local-first, observable, identity-stable agent framework. Zero runtime deps. Stdlib only.**
+**Local-first LLM agent framework. Stdlib only. One pip install away.**
 
 ![dashboard](docs/dashboard.png)
 
-One sentence: Mnemosyne is the substrate that makes local-first agent research cheap — ICMS 3-tier memory, 19 model backends, a Meta-Harness-aligned observability loop, an evolving avatar dashboard, and a 4-layer identity lock that holds whether the model inside is Qwen, Claude, GPT-4, or Gemini.
-
 ```sh
-git clone https://github.com/atxgreene/sturdy-doodle.git && cd sturdy-doodle
-pip install -e .
-mnemosyne-serve --port 8484 &              # daemon + UI dashboard
-open http://127.0.0.1:8484/ui              # see avatar evolve in real time
-./demo.sh                                  # 18-section end-to-end walkthrough
+pip install mnemosyne-harness
+mnemosyne-serve &                           # daemon + dashboard
+open http://127.0.0.1:8484/ui              # avatar evolves in real time
 ```
 
-**Dashboard.** The UI ships with the serve daemon. The avatar visualization
-evolves deterministically from observable agent state — see
-[`docs/UI.md`](./docs/UI.md) for the visual contract (every property maps
-to one number you can grep out of `avatar.json`).
+See [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) for the 10-line first conversation.
+
+## Why this exists
+
+Most agent frameworks pull in 200+ dependencies, force you onto one model
+provider, and treat the agent as a black box. Mnemosyne goes the other way.
+
+| Differentiator | Concrete |
+|---|---|
+| **Stdlib-only core** | Zero runtime dependencies. `pip install mnemosyne-harness` pulls *nothing* from PyPI. The whole framework imports from Python's standard library. Auditable in an afternoon. |
+| **19 backends through one API** | Ollama, LM Studio, OpenAI, Anthropic, OpenRouter, Together, Fireworks, Groq, DeepSeek, Cerebras, Hyperbolic, Perplexity, Novita, Nous, Google, xAI, Mistral, Cohere, vLLM, TGI. One `Backend(provider="…", default_model="…")` call. |
+| **4-layer identity lock** | Whether the model is Qwen, Claude, or GPT-4, the agent identifies as Mnemosyne. Measured against a 40-prompt jailbreak suite (`scenarios/jailbreak.jsonl`). |
+| **Evolving avatar dashboard** | Browser dashboard at `/ui` whose SVG avatar visualizes 16 derived agent traits in real time. Every visual property maps to one observable number — no opaque "personality engine." |
+| **Hermes-compatible trajectories** | Captured turns export to ShareGPT JSONL byte-for-byte matching NousResearch/hermes-agent. Drop into Unsloth or Axolotl for LoRA fine-tuning unchanged. |
+| **Meta-Harness loop closed end-to-end** | `triage → proposer → apply → measure`. The agent observes its own failures and proposes its own fixes — no external orchestrator. |
+| **Local-first storage** | SQLite + FTS5 memory, JSONL events, markdown skills. Your `~/projects/mnemosyne/` is a directory you own. If Mnemosyne disappeared tomorrow, your knowledge survives as plain files. |
+| **Honest framing** | We do not claim AGI. `docs/ROADMAP.md` splits shipped vs. experimental vs. research vs. aspirational. Every "shipped" claim has test coverage. |
 
 | Resting | Active |
 |---|---|
@@ -55,11 +64,16 @@ The brain handles memory retrieval, tool dispatch, identity enforcement, inner d
 
 ## Read these next
 
+- [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) — **start here.** 10 lines from `pip install` to first conversation.
 - [`docs/ROADMAP.md`](./docs/ROADMAP.md) — what's shipped vs experimental vs research vs aspirational. Honest.
+- [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, audit findings, defenses, hardening guide.
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — system design, four-layer stack, DeltaNet inflection point, why-this-over-Langfuse.
-- [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) — methodology + instrumentation-overhead reference numbers. Run it yourself.
+- [`docs/UI.md`](./docs/UI.md) — dashboard visual contract and avatar's 16 derived traits.
+- [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) — methodology + instrumentation-overhead reference numbers.
 - [`docs/LOCAL_MODELS.md`](./docs/LOCAL_MODELS.md) — context-window math + model choice guide for Ollama.
-- [`docs/DEMO.md`](./docs/DEMO.md) — captured transcript of `./demo.sh`. Regenerate anytime.
+- [`docs/TRAINING.md`](./docs/TRAINING.md) — fine-tune a LoRA adapter from your captured conversations.
+- [`docs/DEMO.md`](./docs/DEMO.md) — captured transcript of `./demo.sh`.
+- [`RELEASE.md`](./RELEASE.md) — maintainer's release procedure (PyPI + GitHub).
 - [`CHANGELOG.md`](./CHANGELOG.md) — version-by-version record.
 
 ## Verify anything on this page

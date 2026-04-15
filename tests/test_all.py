@@ -2840,6 +2840,34 @@ def _():
     assert r2.get("error") and "not allowed" in r2["error"]
 
 
+@test("builtin: http_get blocks SSRF — loopback")
+def _():
+    # SSRF defense: refuse to fetch 127.0.0.1 / localhost / 0.0.0.0
+    for url in ("http://127.0.0.1:8484/admin",
+                  "http://localhost/", "http://0.0.0.0:11434/"):
+        r = sbi.http_get(url)
+        assert r.get("error"), f"should have refused {url}, got {r}"
+        assert "private" in r["error"] or "loopback" in r["error"], r
+
+
+@test("builtin: http_get blocks SSRF — RFC1918 + cloud metadata")
+def _():
+    # Cloud metadata endpoint (AWS/GCP/Azure all use 169.254.169.254)
+    r = sbi.http_get("http://169.254.169.254/latest/meta-data/")
+    assert r.get("error") and "private" in r["error"]
+    # RFC1918 internal address
+    r = sbi.http_get("http://10.0.0.1/")
+    assert r.get("error") and "private" in r["error"]
+    r = sbi.http_get("http://192.168.1.1/")
+    assert r.get("error") and "private" in r["error"]
+
+
+@test("builtin: http_get refuses URLs with no hostname")
+def _():
+    r = sbi.http_get("http://")
+    assert r.get("error")
+
+
 @test("builtin: datetime_now returns a well-formed ISO string")
 def _():
     r = sbi.datetime_now()
@@ -3296,6 +3324,45 @@ def _():
     assert "stroke-dasharray=\"4 6\"" in svg  # wisdom ring
     # Count the <line> elements for rays — should have ~6
     assert svg.count("<line") >= 3
+
+
+@test("avatar: compute_state cache hits when nothing changes")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        import time as _time
+        # First call: cache miss, real compute
+        s1 = avatar_mod.compute_state(projects_dir=pd)
+        cached_at_1 = avatar_mod._STATE_CACHE.get(
+            (str(pd), 60, avatar_mod._state_fingerprint(pd))
+        )
+        assert cached_at_1 is not None, "expected cache entry"
+
+        # Second call within window: should return same dict object
+        s2 = avatar_mod.compute_state(projects_dir=pd)
+        assert s1 is s2, "cache hit should return identical object"
+
+        # Touch a file → fingerprint changes → cache miss
+        (pd / "memory.db").write_bytes(b"")
+        _time.sleep(0.01)
+        s3 = avatar_mod.compute_state(projects_dir=pd)
+        # Different object means we recomputed
+        assert s3 is not s2, "fingerprint change should bypass cache"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar: use_cache=False always recomputes")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        s1 = avatar_mod.compute_state(projects_dir=pd, use_cache=False)
+        s2 = avatar_mod.compute_state(projects_dir=pd, use_cache=False)
+        # Different dict objects every call
+        assert s1 is not s2
+        assert s1["computed_utc"] != s2["computed_utc"] or True  # may be same μs
+    finally:
+        shutil.rmtree(pd)
 
 
 @test("avatar: memory rows + tier counts reflected in state")

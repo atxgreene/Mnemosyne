@@ -472,7 +472,15 @@ class Handler(BaseHTTPRequestHandler):
     }
 
     def _ui_root(self) -> Path:
-        return Path(__file__).resolve().parent / "mnemosyne_ui" / "static"
+        # Resolve via the installed package so wheel installs work
+        # (where mnemosyne_serve.py and mnemosyne_ui/ live in
+        # different locations under site-packages).
+        try:
+            import mnemosyne_ui
+            return Path(mnemosyne_ui.__file__).resolve().parent / "static"
+        except ImportError:
+            # Editable / source-tree fallback
+            return Path(__file__).resolve().parent / "mnemosyne_ui" / "static"
 
     def _serve_ui_index(self) -> None:
         index = self._ui_root() / "index.html"
