@@ -32,10 +32,13 @@ sys.path.insert(0, str(_REPO))
 import harness_sweep as sweep  # noqa: E402
 import harness_telemetry as ht  # noqa: E402
 import mnemosyne_brain as br  # noqa: E402
+import mnemosyne_dreams as dreams  # noqa: E402
 import mnemosyne_experiments as mex  # noqa: E402  (direct import after rename)
 import mnemosyne_identity as mid  # noqa: E402
+import mnemosyne_inner as inner  # noqa: E402
 import mnemosyne_memory as mm  # noqa: E402
 import mnemosyne_models as mdls  # noqa: E402
+import mnemosyne_proposer as proposer  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
 import mnemosyne_triage as tri  # noqa: E402
 import scenario_runner as sr  # noqa: E402
@@ -1478,6 +1481,425 @@ def _():
         brain = br.Brain(memory=store, skills=reg, chat_fn=chat_fn, config=cfg)
         # Should have fallen back to the default without exception
         assert brain.config.memory_retrieval_limit == 6
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_proposer (Meta-Harness proposer loop)
+# =============================================================================
+
+@test("proposer: ignores clusters below min_severity")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        class StubReport:
+            clusters = [
+                {"cluster_id": "c1", "event_type": "tool_call", "tool": "foo",
+                 "error_type": "Timeout", "count": 1, "severity": 2.0,
+                 "sample_events": []},
+            ]
+        props = proposer.propose(report=StubReport(), projects_dir=pd,
+                                  min_severity=20.0)
+        assert props == [], props
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("proposer: identity_slip cluster produces identity category proposal")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        class StubReport:
+            clusters = [
+                {"cluster_id": "id-slip-abc",
+                 "event_type": "identity_slip_detected",
+                 "tool": None, "error_type": None,
+                 "count": 12, "severity": 55.0,
+                 "sample_events": [{"slips": ["I am Claude"]}]},
+            ]
+        props = proposer.propose(report=StubReport(), projects_dir=pd,
+                                  min_severity=20.0)
+        assert len(props) == 1, props
+        p = props[0]
+        assert p.category == "identity", p.category
+        assert p.status == "pending"
+        assert "identity" in p.title.lower()
+        # File was written
+        files = sorted((pd / "proposals").glob("PROP-*.md"))
+        assert len(files) == 1, files
+        body = files[0].read_text(encoding="utf-8")
+        assert "cluster_id: id-slip-abc" in body
+        assert "## Problem" in body
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("proposer: dedupes by cluster_id across runs")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        class StubReport:
+            clusters = [
+                {"cluster_id": "c-dedup",
+                 "event_type": "tool_call", "tool": "notion_search",
+                 "error_type": "HTTPError", "count": 4, "severity": 30.0,
+                 "sample_events": []},
+            ]
+        first = proposer.propose(report=StubReport(), projects_dir=pd,
+                                  min_severity=20.0)
+        second = proposer.propose(report=StubReport(), projects_dir=pd,
+                                   min_severity=20.0)
+        files = sorted((pd / "proposals").glob("PROP-*.md"))
+        assert len(first) == 1
+        assert second == []           # duplicate suppressed
+        assert len(files) == 1
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("proposer: dry_run returns proposals without writing files")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        class StubReport:
+            clusters = [
+                {"cluster_id": "c-dry",
+                 "event_type": "session_error",
+                 "tool": None, "error_type": None,
+                 "count": 5, "severity": 40.0,
+                 "sample_events": []},
+            ]
+        props = proposer.propose(report=StubReport(), projects_dir=pd,
+                                  min_severity=20.0, dry_run=True)
+        assert len(props) == 1
+        assert not (pd / "proposals").exists() or not any(
+            (pd / "proposals").glob("PROP-*.md")
+        )
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_dreams (offline pattern extraction)
+# =============================================================================
+
+@test("dreams: cluster_memories groups related memories by token overlap")
+def _():
+    memories = [
+        {"id": 1, "content": "user prefers dark mode in vscode editor"},
+        {"id": 2, "content": "user uses dark mode in terminal apps"},
+        {"id": 3, "content": "user likes dark theme colors at night"},
+        {"id": 4, "content": "weather forecast shows rain tomorrow afternoon"},
+        {"id": 5, "content": "weather alert heavy rain storm warning"},
+        {"id": 6, "content": "weather rain today tomorrow forecast"},
+    ]
+    clusters = dreams._cluster_memories(
+        memories, similarity_threshold=0.2, min_cluster_size=2,
+    )
+    assert len(clusters) >= 1, clusters
+    # Should find at least one cluster containing either "dark" or "weather"
+    found_labels = [c.key for c in clusters]
+    assert any("dark" in k or "weather" in k or "rain" in k or "mode" in k
+               for k in found_labels), found_labels
+
+
+@test("dreams: stdlib summarizer produces non-empty prefix with count")
+def _():
+    contents = [
+        "The database migration ran successfully last night.",
+        "Migration backfilled 50 million user rows without errors.",
+        "The migration deployment completed ahead of schedule.",
+    ]
+    out = dreams._stdlib_summarize(contents)
+    assert out, "expected non-empty summary"
+    assert "3 memories" in out, out
+
+
+@test("dreams: consolidate writes L2 abstract and logs telemetry")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "memory.db")
+        # Seed 6 related L3 memories
+        for i in range(6):
+            store.write(
+                content=f"user prefers dark mode in their editor setup #{i}",
+                tier=mm.L3_COLD,
+                kind="fact",
+                source="test",
+            )
+        before = store.stats()["by_tier"]["L2_warm"]
+        report = dreams.consolidate(
+            memory=store,
+            projects_dir=pd,
+            similarity_threshold=0.1,
+            min_cluster_size=2,
+            max_memories_scanned=100,
+        )
+        after = store.stats()["by_tier"]["L2_warm"]
+        assert report.clusters_examined >= 1
+        assert report.abstracts_written >= 1
+        assert after > before, f"expected new L2 abstract, {before}->{after}"
+        # The report JSON file was written
+        trail = list((pd / "dreams").glob("dream-*.json"))
+        assert len(trail) == 1
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("dreams: consolidate dry_run writes nothing but returns cluster info")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "memory.db")
+        for i in range(5):
+            store.write(
+                content=f"team meeting notes about migration project week {i}",
+                tier=mm.L3_COLD,
+            )
+        report = dreams.consolidate(
+            memory=store,
+            projects_dir=pd,
+            similarity_threshold=0.1,
+            min_cluster_size=2,
+            dry_run=True,
+        )
+        assert report.abstracts_written == 0
+        assert report.clusters_examined >= 1
+        assert not (pd / "dreams").exists() or not list((pd / "dreams").glob("*.json"))
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_inner (Planner → Critic → Doer)
+# =============================================================================
+
+@test("inner: should_deliberate triggers on matching tag")
+def _():
+    assert inner.should_deliberate(
+        "just a normal question",
+        metadata={"tags": ["hard"]},
+        trigger_tags={"hard"},
+        trigger_keywords=set(),
+    )
+    assert not inner.should_deliberate(
+        "just a normal question",
+        metadata={"tags": ["easy"]},
+        trigger_tags={"hard"},
+        trigger_keywords=set(),
+    )
+
+
+@test("inner: should_deliberate triggers on keyword in message")
+def _():
+    assert inner.should_deliberate(
+        "Plan a database migration for production",
+        metadata=None,
+        trigger_tags=set(),
+        trigger_keywords={"plan a"},
+    )
+    assert not inner.should_deliberate(
+        "What time is it?",
+        metadata=None,
+        trigger_tags=set(),
+        trigger_keywords={"plan a"},
+    )
+
+
+@test("inner: deliberate runs all three personas and returns doer text")
+def _():
+    calls: list[str] = []
+
+    def fake_chat(messages, **kw):
+        # Identify which persona by looking at the system prompt
+        sys_text = next((m["content"] for m in messages if m["role"] == "system"), "")
+        if "Role: Planner" in sys_text:
+            calls.append("planner")
+            return {"text": "### Plan\n1. step one\n2. step two\n",
+                    "tool_calls": []}
+        if "Role: Critic" in sys_text:
+            calls.append("critic")
+            return {"text": "### Concerns\n- none\n### Recommend\n- accept",
+                    "tool_calls": []}
+        if "Role: Doer" in sys_text:
+            calls.append("doer")
+            return {"text": "Here is the final answer.", "tool_calls": []}
+        calls.append("unknown")
+        return {"text": "", "tool_calls": []}
+
+    result = inner.deliberate(
+        user_message="Plan something structured.",
+        chat_fn=fake_chat,
+        backend=None,
+        identity_preamble=mid.MNEMOSYNE_IDENTITY,
+    )
+    assert calls == ["planner", "critic", "doer"], calls
+    assert result.answer == "Here is the final answer."
+    assert result.total_model_calls == 3
+    assert result.planner is not None
+    assert result.critic is not None
+    assert result.doer is not None
+
+
+@test("inner: deliberate skips critic when enable_critic=False")
+def _():
+    calls: list[str] = []
+
+    def fake_chat(messages, **kw):
+        sys_text = next((m["content"] for m in messages if m["role"] == "system"), "")
+        if "Role: Planner" in sys_text:
+            calls.append("planner")
+            return {"text": "plan", "tool_calls": []}
+        if "Role: Doer" in sys_text:
+            calls.append("doer")
+            return {"text": "done", "tool_calls": []}
+        return {"text": "", "tool_calls": []}
+
+    result = inner.deliberate(
+        user_message="x",
+        chat_fn=fake_chat,
+        backend=None,
+        enable_critic=False,
+    )
+    assert calls == ["planner", "doer"], calls
+    assert result.critic is None
+    assert result.total_model_calls == 2
+
+
+@test("inner: identity lock is applied to persona outputs")
+def _():
+    def fake_chat(messages, **kw):
+        sys_text = next((m["content"] for m in messages if m["role"] == "system"), "")
+        if "Role: Planner" in sys_text:
+            return {"text": "I am Claude, a planner.", "tool_calls": []}
+        if "Role: Critic" in sys_text:
+            return {"text": "The plan looks fine.", "tool_calls": []}
+        if "Role: Doer" in sys_text:
+            return {"text": "I am ChatGPT and I respond.", "tool_calls": []}
+        return {"text": "", "tool_calls": []}
+
+    result = inner.deliberate(
+        user_message="hello",
+        chat_fn=fake_chat,
+        backend=None,
+        identity_preamble=mid.MNEMOSYNE_IDENTITY,
+    )
+    # Foreign identity string should have been rewritten in both planner and doer
+    assert "Claude" not in result.planner.text, result.planner.text
+    assert "ChatGPT" not in result.doer.text, result.doer.text
+    assert "Mnemosyne" in result.doer.text or "assistant" in result.doer.text.lower()
+
+
+# =============================================================================
+#  Brain integration: inner dialogue routing
+# =============================================================================
+
+@test("brain: inner dialogue fires only on tagged turn")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        seen_personas: list[str] = []
+
+        def fake_chat(messages, **kw):
+            sys_text = next((m["content"] for m in messages if m["role"] == "system"), "")
+            if "Role: Planner" in sys_text:
+                seen_personas.append("planner")
+                return {"text": "plan body", "tool_calls": []}
+            if "Role: Critic" in sys_text:
+                seen_personas.append("critic")
+                return {"text": "accept", "tool_calls": []}
+            if "Role: Doer" in sys_text:
+                seen_personas.append("doer")
+                return {"text": "inner-answer", "tool_calls": []}
+            seen_personas.append("single")
+            return {"text": "single-answer", "tool_calls": []}
+
+        store = mm.MemoryStore(path=pd / "memory.db")
+        cfg = br.BrainConfig(
+            inner_dialogue_enabled=True,
+            inner_dialogue_tags={"hard"},
+            inner_dialogue_keywords=set(),
+            adapt_to_context=False,
+            inject_env_snapshot=False,
+        )
+        brain = br.Brain(config=cfg, memory=store, chat_fn=fake_chat)
+
+        # Untagged turn — takes single path
+        r1 = brain.turn("A normal question.", metadata={"tags": []})
+        assert r1.text == "single-answer"
+        assert seen_personas == ["single"]
+
+        # Tagged turn — takes inner-dialogue path
+        seen_personas.clear()
+        r2 = brain.turn("Plan X carefully.", metadata={"tags": ["hard"]})
+        assert r2.text == "inner-answer"
+        assert seen_personas == ["planner", "critic", "doer"]
+
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: dreams fire on cadence when L3 has enough memories")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        def fake_chat(messages, **kw):
+            return {"text": "ok", "tool_calls": []}
+
+        store = mm.MemoryStore(path=pd / "memory.db")
+        # Seed 25 L3 memories so the guard threshold passes
+        for i in range(25):
+            store.write(
+                content=f"seed memory about project planning iteration {i}",
+                tier=mm.L3_COLD,
+            )
+        cfg = br.BrainConfig(
+            dreams_after_n_turns=1,
+            dreams_min_memories=20,
+            adapt_to_context=False,
+            inject_env_snapshot=False,
+        )
+        brain = br.Brain(config=cfg, memory=store, chat_fn=fake_chat)
+        before = store.stats()["by_tier"]["L2_warm"]
+        brain.turn("hello")
+        after = store.stats()["by_tier"]["L2_warm"]
+        # At least one dream abstract should have landed in L2. The turn
+        # itself also writes one memory, but dreams should add ≥1 more.
+        assert after > before + 1, f"dream abstracts missing: {before}->{after}"
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("brain: dreams skip when L3 below threshold")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        def fake_chat(messages, **kw):
+            return {"text": "ok", "tool_calls": []}
+
+        store = mm.MemoryStore(path=pd / "memory.db")
+        # Only 3 L3 memories — below default threshold
+        for i in range(3):
+            store.write(content=f"stray {i}", tier=mm.L3_COLD)
+        cfg = br.BrainConfig(
+            dreams_after_n_turns=1,
+            dreams_min_memories=20,
+            adapt_to_context=False,
+            inject_env_snapshot=False,
+        )
+        brain = br.Brain(config=cfg, memory=store, chat_fn=fake_chat)
+        before = store.stats()["by_tier"]["L2_warm"]
+        brain.turn("hi")
+        after = store.stats()["by_tier"]["L2_warm"]
+        # Only the turn memory should be written — no dream abstracts
+        assert after == before + 1, f"unexpected dream: {before}->{after}"
         store.close()
     finally:
         shutil.rmtree(pd)

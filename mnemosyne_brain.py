@@ -79,6 +79,7 @@ import mnemosyne_identity as identity
 import mnemosyne_memory as mm
 import mnemosyne_models as models
 import mnemosyne_skills as skills_mod
+import mnemosyne_inner as inner_mod
 
 
 ChatFn = Callable[..., dict[str, Any]]
@@ -141,6 +142,23 @@ class BrainConfig:
     # of retrieved memories dumped on it while also trying to hold a long
     # conversation). Safe no-op on cloud providers.
     adapt_to_context: bool = True
+
+    # Inner dialogue (Planner → Critic → Doer). Costs ~3x model calls so
+    # it is off by default and only fires on tagged turns or turns whose
+    # prompt matches one of the trigger keywords. See mnemosyne_inner.
+    inner_dialogue_enabled: bool = False
+    inner_dialogue_tags: set[str] = field(
+        default_factory=lambda: set(inner_mod.DEFAULT_TRIGGER_TAGS)
+    )
+    inner_dialogue_keywords: set[str] = field(
+        default_factory=lambda: set(inner_mod.DEFAULT_TRIGGER_KEYWORDS)
+    )
+
+    # Dream consolidation. When set, the brain calls mnemosyne_dreams.consolidate
+    # every N turns (idle-ish check — dreams only fire if there are enough L3
+    # memories to be worth the effort). Zero-cost when set to 0 (default).
+    dreams_after_n_turns: int = 0
+    dreams_min_memories: int = 20        # don't dream unless L3 has ≥ this many
 
 
 # ---- brain ------------------------------------------------------------------
@@ -210,13 +228,31 @@ class Brain:
                 except Exception:
                     pass  # consciousness must never break the turn
 
-            response = self._run_turn(user_message, turn_evt)
+            # Decide whether to take the structured inner-dialogue path
+            if self.config.inner_dialogue_enabled and inner_mod.should_deliberate(
+                user_message,
+                metadata=metadata,
+                trigger_tags=self.config.inner_dialogue_tags,
+                trigger_keywords=self.config.inner_dialogue_keywords,
+            ):
+                response = self._run_turn_inner(user_message, turn_evt)
+            else:
+                response = self._run_turn(user_message, turn_evt)
 
             if self.consciousness and hasattr(self.consciousness, "post_turn"):
                 try:
                     self.consciousness.post_turn(user_message, response.text)
                 except Exception:
                     pass
+
+            # Dream consolidation on schedule (never on failed turns)
+            if (self.config.dreams_after_n_turns
+                and self._total_turns > 0
+                and self._total_turns % self.config.dreams_after_n_turns == 0):
+                try:
+                    self._maybe_dream()
+                except Exception:
+                    pass  # dreams must never break a turn
 
             self._turns_successful += 1
             self._log(
@@ -401,6 +437,110 @@ class Brain:
             memory_reads=memory_reads,
             memory_writes=1 if final_text else 0,
             model_calls=model_calls,
+        )
+
+    # ---- inner dialogue path ------------------------------------------------
+
+    def _run_turn_inner(self, user_message: str, parent_evt: str | None) -> BrainResponse:
+        """Planner → Critic → Doer pass. Shares memory + identity with
+        the tool-use loop, skips tool dispatch (inner dialogue is for
+        reasoning-heavy turns, not tool-heavy ones)."""
+        # Shared context: memory hits + optional user docs, computed once.
+        hits = self.memory.search(
+            user_message,
+            limit=self.config.memory_retrieval_limit,
+            tier_max=self.config.memory_tier_ceiling,
+        )
+        self._total_memory_reads += 1
+        shared_context = ""
+        if hits:
+            shared_context = "## Relevant memories\n\n" + "\n".join(
+                f"- [L{h['tier']} {h.get('kind','')}] {h['content']}" for h in hits
+            )
+
+        identity_preamble = (
+            identity.MNEMOSYNE_IDENTITY.strip()
+            if self.config.enforce_identity_lock else None
+        )
+
+        result = inner_mod.deliberate(
+            user_message=user_message,
+            chat_fn=self._chat_fn,
+            backend=self.config.backend,
+            identity_preamble=identity_preamble,
+            personality=self.config.personality,
+            shared_context=shared_context,
+            telemetry=self.telemetry,
+        )
+        self._total_model_calls += result.total_model_calls
+
+        final_text = result.answer or ""
+        # Apply a final identity pass (deliberate already filters each
+        # persona but the final concatenation can still leak).
+        if self.config.enforce_identity_lock and final_text:
+            final_text, slips = identity.enforce_identity(
+                final_text,
+                known_model=self.config.backend.default_model,
+                passthrough=self.config.enforce_identity_audit_only,
+            )
+            if slips:
+                self._log(
+                    "identity_slip_detected",
+                    status="error" if not self.config.enforce_identity_audit_only else "ok",
+                    metadata={"slips": slips, "count": len(slips),
+                              "audit_only": self.config.enforce_identity_audit_only,
+                              "path": "inner_dialogue"},
+                    parent_event_id=parent_evt,
+                )
+
+        if final_text:
+            self.memory.write(
+                content=f"Q: {user_message}\nA: {final_text[:500]}",
+                source="conversation",
+                kind="turn",
+                tier=mm.L2_WARM,
+                metadata={"path": "inner_dialogue"},
+            )
+            self._total_memory_writes += 1
+
+        return BrainResponse(
+            text=final_text,
+            tool_calls=[],
+            memory_reads=1,
+            memory_writes=1 if final_text else 0,
+            model_calls=result.total_model_calls,
+        )
+
+    # ---- dreams -------------------------------------------------------------
+
+    def _maybe_dream(self) -> None:
+        """Fire a dream-consolidation pass if L3 has enough material.
+
+        Cheap guard: skip if fewer than `dreams_min_memories` L3 rows
+        exist. Uses the brain's own model as the summarizer when
+        available — falls back to stdlib otherwise.
+        """
+        try:
+            import mnemosyne_dreams as dreams_mod
+        except ImportError:
+            return
+        try:
+            # Count L3 memories cheaply
+            with self.memory._lock:  # type: ignore[attr-defined]
+                n = self.memory._conn.execute(  # type: ignore[attr-defined]
+                    "SELECT COUNT(*) FROM memories WHERE tier = ?",
+                    (mm.L3_COLD,),
+                ).fetchone()[0]
+        except Exception:
+            return
+        if n < self.config.dreams_min_memories:
+            return
+
+        summarizer = dreams_mod.make_brain_summarizer(self)
+        dreams_mod.consolidate(
+            memory=self.memory,
+            summarizer_fn=summarizer,
+            telemetry=self.telemetry,
         )
 
     # ---- helpers ------------------------------------------------------------

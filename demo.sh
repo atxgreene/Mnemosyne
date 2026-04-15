@@ -45,7 +45,7 @@ printf 'Branch:      %s\n' "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || ech
 printf 'Python:      %s\n' "$(python3 --version)"
 
 # ==============================================================================
-head1 '1/11  pip install -e . into a fresh venv'
+head1 '1/14  pip install -e . into a fresh venv'
 # ==============================================================================
 python3 -m venv "$DEMO_VENV"
 "$DEMO_VENV/bin/pip" install --quiet --upgrade pip
@@ -67,7 +67,7 @@ print('  ✓ all 7 library surfaces import cleanly')
 "
 
 # ==============================================================================
-head1 '2/11  Model providers — 19 backends detected'
+head1 '2/14  Model providers — 19 backends detected'
 # ==============================================================================
 export PATH="$DEMO_VENV/bin:$PATH"
 export MNEMOSYNE_PROJECTS_DIR="$DEMO_PROJECTS"
@@ -79,13 +79,13 @@ head2 'mnemosyne-models current   (no auth configured → falls back)'
 mnemosyne-models current
 
 # ==============================================================================
-head1 '3/11  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)'
+head1 '3/14  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)'
 # ==============================================================================
 head2 'environment-snapshot  (human-readable markdown)'
 environment-snapshot --projects-dir "$DEMO_PROJECTS" 2>&1 | head -30
 
 # ==============================================================================
-head1 '4/11  Memory layer — SQLite+FTS5 with ICMS 3-tier'
+head1 '4/14  Memory layer — SQLite+FTS5 with ICMS 3-tier'
 # ==============================================================================
 MEM_DB="$DEMO_PROJECTS/memory.db"
 
@@ -105,7 +105,7 @@ head2 'Stats:'
 mnemosyne-memory --db "$MEM_DB" stats
 
 # ==============================================================================
-head1 '5/11  Identity lock — regardless of underlying model, agent says Mnemosyne'
+head1 '5/14  Identity lock — regardless of underlying model, agent says Mnemosyne'
 # ==============================================================================
 head2 'Testing enforce_identity() against 5 slip patterns + 3 legitimate uses'
 "$DEMO_VENV/bin/python3" <<'PY'
@@ -159,7 +159,7 @@ mem.close()
 PY
 
 # ==============================================================================
-head1 '6/11  Skills — agentskills.io-compatible registry + self-improvement'
+head1 '6/14  Skills — agentskills.io-compatible registry + self-improvement'
 # ==============================================================================
 "$DEMO_VENV/bin/python3" <<'PY'
 import os, tempfile
@@ -200,7 +200,7 @@ print(f'  Parsed back:  name={loaded.name}  learned={loaded.learned}')
 PY
 
 # ==============================================================================
-head1 '7/11  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT'
+head1 '7/14  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT'
 # ==============================================================================
 head2 'Running examples/sweep_demo.py (8-point sweep, fake harness, ~6 seconds)'
 "$DEMO_VENV/bin/python3" "$SCRIPT_DIR/examples/sweep_demo.py" --projects-dir "$DEMO_PROJECTS" 2>&1 | tail -12
@@ -216,14 +216,14 @@ mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" pareto \
   --axes accuracy,latency_ms_avg --directions max,min --plot 2>&1 | head -30
 
 # ==============================================================================
-head1 '8/11  Aggregate statistics — per-tool call counts, latency percentiles'
+head1 '8/14  Aggregate statistics — per-tool call counts, latency percentiles'
 # ==============================================================================
 LATEST=$(mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" list --limit 1 | head -1 | awk '{print $1}')
 head2 "aggregate for $LATEST"
 mnemosyne-experiments --projects-dir "$DEMO_PROJECTS" aggregate "$LATEST"
 
 # ==============================================================================
-head1 '9/11  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)'
+head1 '9/14  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)'
 # ==============================================================================
 head2 'mnemosyne-triage scan --window-days 30  (reads events.jsonl from our demo runs)'
 mnemosyne-triage --projects-dir "$DEMO_PROJECTS" scan --window-days 30 --top-n 5
@@ -235,12 +235,130 @@ head2 'First 20 lines of the report:'
 head -20 "$DEMO_PROJECTS"/health/*.md 2>/dev/null | sed 's/^/  /'
 
 # ==============================================================================
-head1 '10/11  Live dashboard (single frame via --once --plain)'
+head1 '10/14  Meta-Harness proposer — triage → proposals (rule-based v1)'
+# ==============================================================================
+head2 'Seed an identity-slip event so the proposer has something to react to'
+"$DEMO_VENV/bin/python3" <<'PY'
+import os, harness_telemetry as ht
+rid = ht.create_run(model='demo-model', tags=['proposer-demo'])
+with ht.TelemetrySession(rid) as sess:
+    for _ in range(12):
+        sess.log('identity_slip_detected', status='error',
+                 metadata={'slips': ['I am Claude'], 'count': 1})
+ht.finalize_run(rid, metrics={'turns_total': 12, 'turns_failed': 12})
+print(f'  seeded run: {rid}')
+PY
+
+head2 'mnemosyne-proposer --min-severity 0  (rule engine reads triage clusters)'
+mnemosyne-proposer --projects-dir "$DEMO_PROJECTS" --window-days 30 --min-severity 0
+
+head2 'Proposal written to disk:'
+# shellcheck disable=SC2012
+ls "$DEMO_PROJECTS/proposals/" 2>/dev/null | sed 's/^/  /'
+head2 'First 25 lines of the newest proposal:'
+# shellcheck disable=SC2012
+PROP=$(ls -1t "$DEMO_PROJECTS"/proposals/PROP-*.md 2>/dev/null | head -1)
+[ -n "$PROP" ] && head -25 "$PROP" | sed 's/^/  /'
+
+# ==============================================================================
+head1 '11/14  Dream consolidation — offline pattern extraction from L3 cold'
+# ==============================================================================
+head2 'Seed 12 related L3 memories (user-preference pattern)'
+"$DEMO_VENV/bin/python3" <<'PY'
+import os
+from pathlib import Path
+from mnemosyne_memory import MemoryStore, L3_COLD
+# Use the default memory.db so `mnemosyne-dreams` (CLI) operates on the same store
+pd = Path(os.environ['MNEMOSYNE_PROJECTS_DIR'])
+store = MemoryStore(path=pd / 'memory.db')
+patterns = [
+    'user prefers dark mode in terminal apps',
+    'user uses dark mode in vscode editor',
+    'user likes dark theme colors at night',
+    'user set dark background in obsidian vault',
+    'dark mode preference across all editor tools',
+    'dark palette requested for dashboards',
+    'weather forecast shows rain tomorrow afternoon',
+    'weather alert heavy rain storm warning',
+    'weather rain today tomorrow forecast',
+    'weather update evening rain expected',
+    'weather advisory thunderstorm tonight',
+    'weather report rainy weekend incoming',
+]
+for p in patterns:
+    store.write(content=p, tier=L3_COLD, kind='fact', source='demo')
+print(f'  seeded {len(patterns)} L3 memories')
+print(f'  L3 count: {store.stats()["by_tier"]["L3_cold"]}')
+store.close()
+PY
+
+head2 'mnemosyne-dreams  (stdlib summarizer, no LLM calls)'
+"$DEMO_VENV/bin/python3" -m mnemosyne_dreams \
+  --projects-dir "$DEMO_PROJECTS" \
+  --similarity 0.1 --min-cluster-size 3 --max-memories 100 2>&1 | sed 's/^/  /'
+
+head2 'Dream report JSON:'
+# shellcheck disable=SC2012
+ls "$DEMO_PROJECTS/dreams/" 2>/dev/null | sed 's/^/  /'
+
+# ==============================================================================
+head1 '12/14  Inner dialogue — Planner → Critic → Doer on tagged turns'
+# ==============================================================================
+"$DEMO_VENV/bin/python3" <<'PY'
+import os
+from pathlib import Path
+from mnemosyne_brain import Brain, BrainConfig
+from mnemosyne_memory import MemoryStore
+from mnemosyne_skills import SkillRegistry
+
+# Mock model that returns different text depending on which persona is asking
+def mock_chat(messages, **kw):
+    sys_text = next((m['content'] for m in messages if m['role'] == 'system'), '')
+    if 'Role: Planner' in sys_text:
+        return {'status': 'ok',
+                'text': '### Goal\nReview migration plan.\n\n### Plan\n1. Backup the db\n2. Apply migration in a tx\n3. Validate row counts',
+                'tool_calls': []}
+    if 'Role: Critic' in sys_text:
+        return {'status': 'ok',
+                'text': '### Concerns\n- Backup step needs off-host copy.\n### Recommend\n- revise: add off-host backup',
+                'tool_calls': []}
+    if 'Role: Doer' in sys_text:
+        return {'status': 'ok',
+                'text': 'Plan: (1) take an off-host backup, (2) apply the migration inside a transaction, (3) validate row counts. If any step fails, roll back.',
+                'tool_calls': []}
+    # single-pass fallback
+    return {'status': 'ok', 'text': 'single-pass answer', 'tool_calls': []}
+
+pd = Path(os.environ['MNEMOSYNE_PROJECTS_DIR'])
+store = MemoryStore(path=pd / 'inner-demo.db')
+cfg = BrainConfig(
+    inner_dialogue_enabled=True,
+    inner_dialogue_tags={'hard'},
+    adapt_to_context=False,
+    inject_env_snapshot=False,
+)
+brain = Brain(config=cfg, memory=store, skills=SkillRegistry(), chat_fn=mock_chat)
+
+print('  ── untagged turn (single-pass path)')
+r1 = brain.turn('What is 2 + 2?', metadata={'tags': []})
+print(f'    answer: {r1.text}')
+print(f'    model calls: {r1.model_calls}')
+
+print()
+print('  ── tagged turn (inner-dialogue path)')
+r2 = brain.turn('Plan a production database migration', metadata={'tags': ['hard']})
+print(f'    answer: {r2.text}')
+print(f'    model calls: {r2.model_calls}  (planner + critic + doer)')
+store.close()
+PY
+
+# ==============================================================================
+head1 '13/14  Live dashboard (single frame via --once --plain)'
 # ==============================================================================
 bash "$SCRIPT_DIR/mnemosyne-dashboard.sh" --once --plain
 
 # ==============================================================================
-head1 '11/11  Test suite'
+head1 '14/14  Test suite'
 # ==============================================================================
 head2 'bash test-harness.sh (integration)'
 bash "$SCRIPT_DIR/test-harness.sh" 2>&1 | tail -4
@@ -252,8 +370,9 @@ head2 'python3 tests/test_all.py (unit)'
 head1 'Demo complete.'
 # ==============================================================================
 printf '\n'
-printf 'All 11 sections exercised. Identity lock holds across slip attempts.\n'
-printf 'Triage engine clusters real events from the demo runs into a grade.\n'
+printf 'All 14 sections exercised. Identity lock holds across slip attempts.\n'
+printf 'Triage clusters real events, proposer writes reviewable markdown,\n'
+printf 'dreams compress L3 cold memories, inner dialogue fires on hard turns.\n'
 printf 'Full pipeline produces real experiments in the fake PROJECTS_DIR and\n'
 printf 'the CLI tools read them back without sys.path shims. All tests pass.\n'
 printf '\n'

@@ -1,32 +1,11 @@
-# Mnemosyne — end-to-end demo transcript
-
-*Regenerate with `bash demo.sh > docs/DEMO.md 2>&1` (wrap in the markdown preamble below). This is the captured output of `demo.sh` — 11 sections, no hand-editing, no faking. Re-runnable in any fresh clone with zero API keys and zero network access.*
-
-**What the demo exercises:**
-
-1. `pip install -e .` into a clean venv — verifies 9 console entry points on `$PATH` and every library surface imports with no `sys.path` hacks
-2. `mnemosyne-models list` + `current` — 19 supported providers enumerated
-3. `environment-snapshot` — first-turn preamble (Meta-Harness Terminal-Bench-2 pattern)
-4. Memory layer — writes across L1/L2/L3, FTS5 search, `--tier-max`, stats
-5. **Identity lock** — filter rewrites 5 slip patterns / keeps 3 legitimate references; brain turn with a mock "I am Claude" model shows the lock HOLDS ✓
-6. Skills — `@register_python`, `$PATH` command discovery, `record_learned_skill()`
-7. Full pipeline — 8-point parameter sweep × 10 scenarios, Pareto frontier
-8. Aggregate stats — per-tool call counts, latency p50/p95/p99
-9. **Triage engine** — reads events.jsonl across recent runs, clusters errors by `(event_type, tool, error_type)`, scores severity on six dimensions, emits a markdown health report
-10. Live dashboard frame (`--once --plain`)
-11. Test suite — integration + unit, all green
-
----
-
-```
 Mnemosyne end-to-end demo
-Generated:   2026-04-15T00:57:42+00:00
-Commit:      ad5a84d
+Generated:   2026-04-15T01:59:33+00:00
+Commit:      30e7971
 Branch:      claude/setup-mnemosyne-consciousness-NZqQE
 Python:      Python 3.11.15
 
 ────────────────────────────────────────────────────────────────
- 1/11  pip install -e . into a fresh venv
+ 1/14  pip install -e . into a fresh venv
 ────────────────────────────────────────────────────────────────
 Successfully built mnemosyne-harness
 Installing collected packages: mnemosyne-harness
@@ -35,10 +14,12 @@ Successfully installed mnemosyne-harness-0.1.0
 ── Installed console entry points on $PATH:
   environment-snapshot
   harness-telemetry
+  mnemosyne-dreams
   mnemosyne-experiments
   mnemosyne-memory
   mnemosyne-models
   mnemosyne-pipeline
+  mnemosyne-proposer
   mnemosyne-triage
   notion-search
   obsidian-search
@@ -47,7 +28,7 @@ Successfully installed mnemosyne-harness-0.1.0
   ✓ all 7 library surfaces import cleanly
 
 ────────────────────────────────────────────────────────────────
- 2/11  Model providers — 19 backends detected
+ 2/14  Model providers — 19 backends detected
 ────────────────────────────────────────────────────────────────
 
 ── mnemosyne-models list
@@ -81,13 +62,13 @@ default_model:  qwen3:8b
 has_api_key:    False
 
 ────────────────────────────────────────────────────────────────
- 3/11  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)
+ 3/14  Environment snapshot  (first-turn preamble, Meta-Harness Terminal-Bench 2 pattern)
 ────────────────────────────────────────────────────────────────
 
 ── environment-snapshot  (human-readable markdown)
 # Mnemosyne environment snapshot
 
-**Projects dir:** /tmp/mnemo-demo-vOf55z/projects (0 entries)
+**Projects dir:** /tmp/mnemo-demo-JWk3ji/projects (0 entries)
 
 **.env:** not found (run mnemosyne-wizard.sh)
 
@@ -95,7 +76,7 @@ has_api_key:    False
 
 **GPU:** none detected (CPU inference)
 
-**venv:** NOT FOUND at /tmp/mnemo-demo-vOf55z/projects/.venv
+**venv:** NOT FOUND at /tmp/mnemo-demo-JWk3ji/projects/.venv
 
 **Skills available:** notion-search, obsidian-search
 
@@ -106,7 +87,7 @@ has_api_key:    False
 **Platform:** Linux 6.18.5, Python 3.11.15
 
 ────────────────────────────────────────────────────────────────
- 4/11  Memory layer — SQLite+FTS5 with ICMS 3-tier
+ 4/14  Memory layer — SQLite+FTS5 with ICMS 3-tier
 ────────────────────────────────────────────────────────────────
 
 ── Writing 4 memories across all three tiers
@@ -134,12 +115,12 @@ has_api_key:    False
     "project": 1
   },
   "fts5_enabled": true,
-  "db_path": "/tmp/mnemo-demo-vOf55z/projects/memory.db",
+  "db_path": "/tmp/mnemo-demo-JWk3ji/projects/memory.db",
   "schema_version": 1
 }
 
 ────────────────────────────────────────────────────────────────
- 5/11  Identity lock — regardless of underlying model, agent says Mnemosyne
+ 5/14  Identity lock — regardless of underlying model, agent says Mnemosyne
 ────────────────────────────────────────────────────────────────
 
 ── Testing enforce_identity() against 5 slip patterns + 3 legitimate uses
@@ -164,7 +145,7 @@ has_api_key:    False
   identity lock: HELD ✓
 
 ────────────────────────────────────────────────────────────────
- 6/11  Skills — agentskills.io-compatible registry + self-improvement
+ 6/14  Skills — agentskills.io-compatible registry + self-improvement
 ────────────────────────────────────────────────────────────────
   Registered skills: ['add']
   OpenAI tool-spec shape:
@@ -194,11 +175,11 @@ has_api_key:    False
 
   Discovered 2 $PATH skills: ['notion_search', 'obsidian_search']
 
-  Learned skill written to: projects/skills/learned/search-and-summarize-20260415-005750.md
+  Learned skill written to: projects/skills/learned/search-and-summarize-20260415-015941.md
   Parsed back:  name=search-and-summarize  learned=True
 
 ────────────────────────────────────────────────────────────────
- 7/11  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT
+ 7/14  Full pipeline — OBSERVE → EVALUATE → SWEEP → COMPARE → INSPECT
 ────────────────────────────────────────────────────────────────
 
 ── Running examples/sweep_demo.py (8-point sweep, fake harness, ~6 seconds)
@@ -208,50 +189,50 @@ Demo sweep finished: 8 runs created.
 
 Inspect the results:
 
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-vOf55z/projects ./mnemosyne-experiments.py list
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-vOf55z/projects ./mnemosyne-experiments.py top-k 3 --metric accuracy
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-vOf55z/projects ./mnemosyne-experiments.py top-k 3 --metric latency_ms_avg --direction min
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-vOf55z/projects ./mnemosyne-experiments.py pareto \
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py list
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py top-k 3 --metric accuracy
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py top-k 3 --metric latency_ms_avg --direction min
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py pareto \
       --axes accuracy,latency_ms_avg --directions max,min --plot
-  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-vOf55z/projects ./mnemosyne-experiments.py aggregate run_20260415-005750-mode-qwen3-8b-retr-5-temp-00
+  MNEMOSYNE_PROJECTS_DIR=/tmp/mnemo-demo-JWk3ji/projects ./mnemosyne-experiments.py aggregate run_20260415-015941-mode-qwen3-8b-retr-5-temp-00
 
 ── mnemosyne-experiments list  (newest first)
-run_20260415-005758-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 00:57:58  events=42     tags=sweep,demo,example
-run_20260415-005757-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 00:57:57  events=42     tags=sweep,demo,example
-run_20260415-005756-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 00:57:56  events=42     tags=sweep,demo,example
-run_20260415-005755-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 00:57:55  events=42     tags=sweep,demo,example
-run_20260415-005754-mode-qwen3-8b-retr-15-temp-05  [completed]  qwen3:8b            2026-04-15 00:57:54  events=42     tags=sweep,demo,example
-run_20260415-005753-mode-qwen3-8b-retr-15-temp-00  [completed]  qwen3:8b            2026-04-15 00:57:53  events=42     tags=sweep,demo,example
-run_20260415-005751-mode-qwen3-8b-retr-5-temp-05  [completed]  qwen3:8b            2026-04-15 00:57:51  events=42     tags=sweep,demo,example
-run_20260415-005750-mode-qwen3-8b-retr-5-temp-00  [completed]  qwen3:8b            2026-04-15 00:57:50  events=42     tags=sweep,demo,example
+run_20260415-015949-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:49  events=42     tags=sweep,demo,example
+run_20260415-015948-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:48  events=42     tags=sweep,demo,example
+run_20260415-015947-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:47  events=42     tags=sweep,demo,example
+run_20260415-015946-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:46  events=42     tags=sweep,demo,example
+run_20260415-015945-mode-qwen3-8b-retr-15-temp-05  [completed]  qwen3:8b            2026-04-15 01:59:45  events=42     tags=sweep,demo,example
+run_20260415-015944-mode-qwen3-8b-retr-15-temp-00  [completed]  qwen3:8b            2026-04-15 01:59:44  events=42     tags=sweep,demo,example
+run_20260415-015942-mode-qwen3-8b-retr-5-temp-05  [completed]  qwen3:8b            2026-04-15 01:59:42  events=42     tags=sweep,demo,example
+run_20260415-015941-mode-qwen3-8b-retr-5-temp-00  [completed]  qwen3:8b            2026-04-15 01:59:41  events=42     tags=sweep,demo,example
 
 ── Top 3 by accuracy:
 Top 3 runs by accuracy (max):
-  run_20260415-005757-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  model=gemma4:e4b
-  run_20260415-005755-mode-gemma4-e-retr-5-temp-00  accuracy=0.5  model=gemma4:e4b
-  run_20260415-005753-mode-qwen3-8b-retr-15-temp-00  accuracy=0.5  model=qwen3:8b
+  run_20260415-015948-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  model=gemma4:e4b
+  run_20260415-015946-mode-gemma4-e-retr-5-temp-00  accuracy=0.5  model=gemma4:e4b
+  run_20260415-015944-mode-qwen3-8b-retr-15-temp-00  accuracy=0.5  model=qwen3:8b
 
 ── Pareto frontier on accuracy × latency  (ASCII plot):
 Pareto frontier on (accuracy, latency_ms_avg) with directions (max, min):
-  run_20260415-005757-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  latency_ms_avg=54.188795812514456  model=gemma4:e4b
+  run_20260415-015948-mode-gemma4-e-retr-15-temp-00  accuracy=0.5  latency_ms_avg=54.22643793748705  model=gemma4:e4b
 
   latency_ms_avg
-    85.40 |.                         .                         
+    85.39 |.                         .                         
     83.32 |                                                    
     81.24 |                                                    
     79.16 |                                                    
     77.08 |                                                   .
     75.00 |                                                   .
-    72.92 |                                                    
-    70.84 |                                                    
-    68.76 |                                                    
-    66.67 |                                                    
-    64.59 |                                                    
-    62.51 |                          .                         
-    60.43 |                          .                         
-    58.35 |                                                    
-    56.27 |                                                    
-    54.19 |                                                   #
+    72.93 |                                                    
+    70.85 |                                                    
+    68.77 |                                                    
+    66.69 |                                                    
+    64.62 |                                                    
+    62.54 |                          .                         
+    60.46 |                          .                         
+    58.38 |                                                    
+    56.30 |                                                    
+    54.23 |                                                   #
           +----------------------------------------------------
           0.38                                            0.50
                                 accuracy
@@ -259,11 +240,11 @@ Pareto frontier on (accuracy, latency_ms_avg) with directions (max, min):
   legend:  * = on Pareto frontier   . = dominated   # = overlap
 
 ────────────────────────────────────────────────────────────────
- 8/11  Aggregate statistics — per-tool call counts, latency percentiles
+ 8/14  Aggregate statistics — per-tool call counts, latency percentiles
 ────────────────────────────────────────────────────────────────
 
-── aggregate for run_20260415-005758-mode-gemma4-e-retr-15-temp-05
-# aggregate for run_20260415-005758-mode-gemma4-e-retr-15-temp-05
+── aggregate for run_20260415-015949-mode-gemma4-e-retr-15-temp-05
+# aggregate for run_20260415-015949-mode-gemma4-e-retr-15-temp-05
 
 total events: 42
   scenario_end   16
@@ -278,15 +259,15 @@ total events: 42
   ok:           7
   errors:       0
   success_rate: 100.00%
-  duration_ms:  avg=20.8  p50=23.1  p95=30.8  p99=30.8  total=145.9
+  duration_ms:  avg=20.9  p50=23.2  p95=30.9  p99=30.9  total=146.1
 
 ## per-tool
   tool                           calls      ok     err     rate    avg_ms    p95_ms
-  notion_search                      3       3       0  100.0%      26.5      30.8
+  notion_search                      3       3       0  100.0%      26.5      30.9
   obsidian_search                    4       4       0  100.0%      16.6      28.8
 
 ────────────────────────────────────────────────────────────────
- 9/11  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)
+ 9/14  Self-healing triage engine (Peter Pang / CREAO pattern, local-first)
 ────────────────────────────────────────────────────────────────
 
 ── mnemosyne-triage scan --window-days 30  (reads events.jsonl from our demo runs)
@@ -302,7 +283,7 @@ Mnemosyne health — grade D
   top 1 clusters:
     [ 61.2]  scenario_end            -                   -  (n=69, runs=8)
 
-  report written: /tmp/mnemo-demo-vOf55z/projects/health/2026-04-15.md
+  report written: /tmp/mnemo-demo-JWk3ji/projects/health/2026-04-15.md
 
 ── Daily health report was written to:
   2026-04-15.md
@@ -310,7 +291,7 @@ Mnemosyne health — grade D
 ── First 20 lines of the report:
   # Mnemosyne health report — 2026-04-15
   
-  **Grade: D**  ·  window: 30d  ·  runs: 8  ·  events: 336  ·  generated: 2026-04-15T00:57:59.815193Z
+  **Grade: D**  ·  window: 30d  ·  runs: 8  ·  events: 336  ·  generated: 2026-04-15T01:59:50.773947Z
   
   ## Headline metrics
   
@@ -327,74 +308,153 @@ Mnemosyne health — grade D
   - tool: `-`
   - error_type: `-`
   - count: 69  ·  runs: 8
-  - first seen: `2026-04-15T00:57:51.209913Z`
+  - first seen: `2026-04-15T01:59:42.142896Z`
 
 ────────────────────────────────────────────────────────────────
- 10/11  Live dashboard (single frame via --once --plain)
+ 10/14  Meta-Harness proposer — triage → proposals (rule-based v1)
 ────────────────────────────────────────────────────────────────
-Mnemosyne dashboard   2026-04-15T00:57:59+00:00
-$PROJECTS_DIR: /tmp/mnemo-demo-vOf55z/projects
+
+── Seed an identity-slip event so the proposer has something to react to
+  seeded run: run_20260415-015950-976e38
+
+── mnemosyne-proposer --min-severity 0  (rule engine reads triage clusters)
+Generated 2 proposal(s):
+  [ 61.2] PROP-0001 skill    Scenario failures clustered (69 events, severity 61.2)
+  [ 52.5] PROP-0002 identity Identity slips recurring (12 events, severity 52.5)
+
+Written to: /tmp/mnemo-demo-JWk3ji/projects/proposals/
+
+── Proposal written to disk:
+  PROP-0001-scenario-failures-clustered-69-events-se.md
+  PROP-0002-identity-slips-recurring-12-events-sever.md
+
+── First 25 lines of the newest proposal:
+  ---
+  id: PROP-0002
+  created_utc: 2026-04-15T01:59:50.873849Z
+  status: pending
+  severity: 52.5
+  cluster_id: 75efbe3366fa
+  category: identity
+  ---
+  # Identity slips recurring (12 events, severity 52.5)
+  
+  ## Problem
+  
+  The identity filter has caught 12 first-person slips to foreign model names across recent runs. This means the model is trying to self-identify as Claude/GPT/etc. despite the MNEMOSYNE_IDENTITY system preamble.
+  
+  ## Proposal
+  
+  Two non-exclusive options:
+  
+  1. Lower `temperature` on the current Backend — high temperature correlates with prompt-obedience drift. Sweep [0.0, 0.2, 0.5] and compare slip rate.
+  2. Extend `mnemosyne_identity._SLIP_PATTERNS` if new phrasings are appearing (check `Sample events` below for patterns not yet caught).
+  3. If a specific model is the main offender per `affected_models`, switch to a different model with better prompt adherence for routing-heavy turns (Qwen 3.5, Gemma 4 tend to be strong).
+  
+  ## How to verify
+  
+  Run the 6 identity scenarios in `scenarios.example.jsonl` against the candidate configuration via `harness_sweep`. Target: `identity_slip_rate_per_1000 == 0` on the follow-up triage scan.
+
+────────────────────────────────────────────────────────────────
+ 11/14  Dream consolidation — offline pattern extraction from L3 cold
+────────────────────────────────────────────────────────────────
+
+── Seed 12 related L3 memories (user-preference pattern)
+  seeded 12 L3 memories
+  L3 count: 13
+
+── mnemosyne-dreams  (stdlib summarizer, no LLM calls)
+  dream: dream-20260415T015950Z
+    scanned:   13 memories
+    clusters:  2
+    abstracts: 2 (stdlib)
+  
+    [6x] weather report rainy
+      Pattern across 6 memories: weather rain today tomorrow forecast
+    [6x] dark palette requested
+      Pattern across 6 memories: user uses dark mode in vscode editor
+
+── Dream report JSON:
+  dream-20260415T015950Z.json
+
+────────────────────────────────────────────────────────────────
+ 12/14  Inner dialogue — Planner → Critic → Doer on tagged turns
+────────────────────────────────────────────────────────────────
+  ── untagged turn (single-pass path)
+    answer: single-pass answer
+    model calls: 1
+
+  ── tagged turn (inner-dialogue path)
+    answer: Plan: (1) take an off-host backup, (2) apply the migration inside a transaction, (3) validate row counts. If any step fails, roll back.
+    model calls: 3  (planner + critic + doer)
+
+────────────────────────────────────────────────────────────────
+ 13/14  Live dashboard (single frame via --once --plain)
+────────────────────────────────────────────────────────────────
+Mnemosyne dashboard   2026-04-15T01:59:51+00:00
+$PROJECTS_DIR: /tmp/mnemo-demo-JWk3ji/projects
 ────────────────────────────────────────────────────────────────
 Ollama: not reachable at http://localhost:11434
-Experiments: 8 runs, 292K on disk
+Experiments: 9 runs, 312K on disk
 ────────────────────────────────────────────────────────────────
 Last 5 runs:
-  run_20260415-005758-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 00:57:58  events=42     tags=sweep,demo,example
-  run_20260415-005757-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 00:57:57  events=42     tags=sweep,demo,example
-  run_20260415-005756-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 00:57:56  events=42     tags=sweep,demo,example
-  run_20260415-005755-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 00:57:55  events=42     tags=sweep,demo,example
-  run_20260415-005754-mode-qwen3-8b-retr-15-temp-05  [completed]  qwen3:8b            2026-04-15 00:57:54  events=42     tags=sweep,demo,example
+  run_20260415-015950-976e38  [completed]  demo-model          2026-04-15 01:59:50  events=14     tags=proposer-demo
+  run_20260415-015949-mode-gemma4-e-retr-15-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:49  events=42     tags=sweep,demo,example
+  run_20260415-015948-mode-gemma4-e-retr-15-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:48  events=42     tags=sweep,demo,example
+  run_20260415-015947-mode-gemma4-e-retr-5-temp-05  [completed]  gemma4:e4b          2026-04-15 01:59:47  events=42     tags=sweep,demo,example
+  run_20260415-015946-mode-gemma4-e-retr-5-temp-00  [completed]  gemma4:e4b          2026-04-15 01:59:46  events=42     tags=sweep,demo,example
 ────────────────────────────────────────────────────────────────
 Memory:
   {
-    "total": 4,
+    "total": 18,
     "by_tier": {
       "L1_hot": 2,
-      "L2_warm": 1,
-      "L3_cold": 1
+      "L2_warm": 3,
+      "L3_cold": 13
     },
     "by_kind": {
-      "fact": 1,
+      "dream_abstract": 2,
+      "fact": 13,
       "preference": 2,
       "project": 1
     },
     "fts5_enabled": true,
-    "db_path": "/tmp/mnemo-demo-vOf55z/projects/memory.db",
+    "db_path": "/tmp/mnemo-demo-JWk3ji/projects/memory.db",
     "schema_version": 1
   }
 ────────────────────────────────────────────────────────────────
 Recent events (latest run):
-  scenario_end    -                        51.9ms  ok
-  scenario_start  -                              -  ok
-  scenario_end    -                        51.9ms  error
-  scenario_summary  -                              -  ok
+  identity_slip_detected  -                              -  error
+  identity_slip_detected  -                              -  error
+  identity_slip_detected  -                              -  error
+  identity_slip_detected  -                              -  error
   session_end     -                              -  ok
 ────────────────────────────────────────────────────────────────
 Disk: /dev/vda        252G  7.3G   30G  20% /
 
 ────────────────────────────────────────────────────────────────
- 11/11  Test suite
+ 14/14  Test suite
 ────────────────────────────────────────────────────────────────
 
 ── bash test-harness.sh (integration)
 
-────────────────────────────────────────────────
-  ✓ 29 checks passed, 0 failed
-────────────────────────────────────────────────
+[2m────────────────────────────────────────────────[0m
+[1;32m  ✓ 29 checks passed, 0 failed[0m
+[2m────────────────────────────────────────────────[0m
 
 ── python3 tests/test_all.py (unit)
 
-106/106 tests passed in 1.17s
+[1;32m122/122 tests passed[0m in 1.21s
 
 ────────────────────────────────────────────────────────────────
  Demo complete.
 ────────────────────────────────────────────────────────────────
 
-All 11 sections exercised. Identity lock holds across slip attempts.
-Triage engine clusters real events from the demo runs into a grade.
+All 14 sections exercised. Identity lock holds across slip attempts.
+Triage clusters real events, proposer writes reviewable markdown,
+dreams compress L3 cold memories, inner dialogue fires on hard turns.
 Full pipeline produces real experiments in the fake PROJECTS_DIR and
 the CLI tools read them back without sys.path shims. All tests pass.
 
 Re-run this demo anytime with: bash demo.sh
 Transcript regenerated with:   bash demo.sh > docs/DEMO.md 2>&1
-```
