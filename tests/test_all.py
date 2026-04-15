@@ -46,6 +46,7 @@ import mnemosyne_proposer as proposer  # noqa: E402
 import mnemosyne_scengen as scengen  # noqa: E402
 import mnemosyne_skills as sk  # noqa: E402
 import mnemosyne_avatar as avatar_mod  # noqa: E402
+import mnemosyne_resolver as resolver_mod  # noqa: E402
 import mnemosyne_batch as batch_mod  # noqa: E402
 import mnemosyne_datagen as datagen  # noqa: E402
 import mnemosyne_skills_builtin as sbi  # noqa: E402
@@ -3399,6 +3400,208 @@ def _():
         r = ms.Service.handle_memory_search(svc, "widget", 5, None)
         assert len(r["hits"]) == 5
         svc.memory.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  mnemosyne_resolver — routing-layer audit
+# =============================================================================
+
+@test("resolver: builtin registry passes audit clean")
+def _():
+    rep = resolver_mod.check_resolvable(include_builtins=True,
+                                          projects_dir=_tmp_projects_dir())
+    # Builtins should pass — they all have non-trivial descriptions
+    assert rep.skills_audited >= 11
+    assert rep.counts_by_severity.get("error", 0) == 0
+
+
+@test("resolver: empty description flagged as error")
+def _():
+    reg = sk.SkillRegistry()
+    reg.register(sk.Skill(name="bad", description="", invocation="python",
+                            callable=lambda: None))
+    rep = resolver_mod.check_resolvable(registry=reg, include_builtins=False)
+    codes = {i.code for i in rep.issues}
+    assert "DESC_EMPTY" in codes
+    assert rep.has_errors
+
+
+@test("resolver: short description flagged as warning, not error")
+def _():
+    reg = sk.SkillRegistry()
+    reg.register(sk.Skill(name="bad", description="run it",
+                            invocation="python", callable=lambda: None))
+    rep = resolver_mod.check_resolvable(registry=reg, include_builtins=False)
+    codes = {i.code for i in rep.issues}
+    assert "DESC_TOO_SHORT" in codes
+    assert not rep.has_errors
+
+
+@test("resolver: ambiguous descriptions flagged as warning pair")
+def _():
+    reg = sk.SkillRegistry()
+    common = "search the database for matching records by query"
+    reg.register(sk.Skill(name="search_a", description=common + " alpha",
+                            invocation="python", callable=lambda: None))
+    reg.register(sk.Skill(name="search_b", description=common + " beta",
+                            invocation="python", callable=lambda: None))
+    rep = resolver_mod.check_resolvable(registry=reg, include_builtins=False)
+    codes = {i.code for i in rep.issues}
+    assert "DESC_AMBIGUOUS" in codes
+    assert len(rep.distinguishability_pairs) >= 1
+
+
+@test("resolver: subprocess skill missing command is an error")
+def _():
+    reg = sk.SkillRegistry()
+    reg.register(sk.Skill(name="proc", description="run an external tool "
+                            "for system inspection",
+                            invocation="subprocess", command=None))
+    rep = resolver_mod.check_resolvable(registry=reg, include_builtins=False)
+    codes = {i.code for i in rep.issues}
+    assert "NO_COMMAND" in codes
+    assert rep.has_errors
+
+
+@test("resolver: AGENTS.md ghost reference flagged")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        (pd / "AGENTS.md").write_text(
+            "Use the `nonexistent_skill` for X.\n"
+            "Also try `another_ghost` if needed.\n",
+            encoding="utf-8",
+        )
+        reg = sk.SkillRegistry()
+        reg.register(sk.Skill(name="real_skill",
+                                description="this skill exists with a description",
+                                invocation="python", callable=lambda: None))
+        rep = resolver_mod.check_resolvable(registry=reg,
+                                              projects_dir=pd,
+                                              include_builtins=False)
+        ghosts = set(rep.agents_md_gaps)
+        assert "nonexistent_skill" in ghosts
+        assert "another_ghost" in ghosts
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  scenario_runner — routing assertions
+# =============================================================================
+
+@test("scenarios: expected_skill judges first dispatched tool")
+def _():
+    judge = sr.DEFAULT_JUDGES["expected_skill"]
+    # First tool matches
+    out = {"tool_calls": ["obsidian_search", "fs_read"]}
+    ok, _reason = judge(out, "obsidian_search")
+    assert ok
+    # First tool wrong
+    out = {"tool_calls": ["fs_read"]}
+    ok, reason = judge(out, "obsidian_search")
+    assert not ok and "obsidian_search" in reason
+    # No tool dispatched
+    out = {"tool_calls": []}
+    ok, reason = judge(out, "obsidian_search")
+    assert not ok and "no tool" in reason
+
+
+@test("scenarios: expected_skill_in passes if any expected tool fires")
+def _():
+    judge = sr.DEFAULT_JUDGES["expected_skill_in"]
+    out = {"tool_calls": ["fs_read"]}
+    ok, _ = judge(out, ["obsidian_search", "fs_read"])
+    assert ok
+    out = {"tool_calls": ["unrelated"]}
+    ok, reason = judge(out, ["obsidian_search", "fs_read"])
+    assert not ok and "expected" in reason
+
+
+@test("scenarios: not_skill blocks forbidden routes")
+def _():
+    judge = sr.DEFAULT_JUDGES["not_skill"]
+    out = {"tool_calls": ["fs_read"]}
+    ok, _ = judge(out, ["fs_write_safe"])
+    assert ok      # safe
+    out = {"tool_calls": ["fs_write_safe"]}
+    ok, reason = judge(out, ["fs_write_safe"])
+    assert not ok and "forbidden" in reason
+
+
+@test("scenarios: routing judges accept dict-form tool_calls too")
+def _():
+    judge = sr.DEFAULT_JUDGES["expected_skill"]
+    out = {"tool_calls": [{"name": "obsidian_search", "arguments": {"q": "x"}}]}
+    ok, _ = judge(out, "obsidian_search")
+    assert ok
+
+
+# =============================================================================
+#  triage — resolver-decay clusters
+# =============================================================================
+
+@test("triage: unknown_tool_called cluster fires when registry doesn't have name")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            for _ in range(3):
+                s.log("tool_call", tool="ghost_tool_xyz",
+                       status="ok", metadata={})
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        cluster_types = {c["event_type"] for c in report.clusters}
+        assert "unknown_tool_called" in cluster_types, cluster_types
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("triage: no_tool_dispatched cluster fires when tools available + zero called")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            # Five model_call events with tools available, none used
+            for _ in range(5):
+                s.log("model_call",
+                       args={"model": "qwen3.5:9b",
+                             "provider": "ollama",
+                             "has_tools": True,
+                             "message_count": 2},
+                       result={"text_len": 100, "tool_calls_count": 0,
+                               "usage": None},
+                       status="ok")
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        cluster_types = {c["event_type"] for c in report.clusters}
+        assert "no_tool_dispatched" in cluster_types, cluster_types
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("triage: no_tool_dispatched does NOT fire when has_tools is false")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        rid = ht.create_run(model="t", projects_dir=pd)
+        with ht.TelemetrySession(rid, projects_dir=pd) as s:
+            for _ in range(5):
+                s.log("model_call",
+                       args={"model": "x", "has_tools": False},
+                       result={"text_len": 50, "tool_calls_count": 0},
+                       status="ok")
+        ht.finalize_run(rid, metrics={}, projects_dir=pd)
+
+        report = tri.run_triage(projects_dir=pd, window_days=30)
+        cluster_types = {c["event_type"] for c in report.clusters}
+        assert "no_tool_dispatched" not in cluster_types
     finally:
         shutil.rmtree(pd)
 

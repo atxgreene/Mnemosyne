@@ -2,6 +2,78 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.3.5] — 2026-04-15 — routing-layer audit (Tan "Resolvers" 2026)
+
+Inspired by Garry Tan's "Resolvers: The Routing Table for Intelligence"
+(2026). Three engineering gaps the article identifies — invisible
+skills, ambiguous descriptions, and resolver decay — addressed
+narrowly with three additions. **No new "RESOLVER.md" file**: we're
+skill-registry-first; the registry's own `description` field is the
+resolver, and this work makes sure that field is strong enough to do
+its job.
+
+**`mnemosyne_resolver.py`** — read-only audit of the routing layer.
+
+  CLI: `mnemosyne-resolver check [--json] [--strict]`
+
+  Checks each registered skill for:
+    DESC_EMPTY        no description (model can't pick it)              error
+    DESC_TOO_SHORT    < 24 chars (likely too vague to win routing)      warn
+    DESC_AMBIGUOUS    cosine similarity ≥ 0.85 with another skill      warn
+    NO_CALLABLE       declared python skill with no callable           error
+    NO_COMMAND        declared subprocess skill with no command        error
+    NAME_COLLISION    two skills with the same name                    error
+    AGENTS_MD_GHOST   AGENTS.md mentions a skill that isn't registered warn
+
+  Exit 0 / 1 / 2 for clean / warnings / errors. Strict mode treats
+  warnings as failures, suitable for CI.
+
+  Distinguishability uses a stdlib hashed bag-of-words vector and
+  cosine. Same algorithm as `mnemosyne_embeddings.HashedBowEmbedder`
+  but inlined so the audit has no module dependency.
+
+**`scenario_runner.py`** — three new judges for routing assertions
+(was: only output-text judges):
+
+  expected_skill        first dispatched tool name must equal this
+  expected_skill_in     at least one dispatched tool must be in this list
+  not_skill             none of the dispatched tools may be in this list
+
+  Means scenarios can now assert *which skill the brain picked*, not
+  just whether the text answer was right. Critical for testing the
+  resolver layer and for `mnemosyne-train eval` to measure routing
+  accuracy under A/B comparisons.
+
+**`mnemosyne_triage.py`** — two synthetic clusters surface resolver
+decay automatically (no user setup needed):
+
+  unknown_tool_called   model dispatched a tool name not in the registry
+                        (strong signal that a real skill's description
+                        is too vague — model hallucinated something
+                        more specific). blast_radius=0.5
+  no_tool_dispatched    model_call had has_tools=True but produced 0
+                        tool_calls. soft signal — a cluster of these
+                        means the resolver layer is under-firing.
+                        blast_radius=0.35
+
+  Both are clustered alongside existing tool/identity errors, so the
+  daily/weekly health report surfaces resolver decay without changing
+  user workflow.
+
+**Packaging:** 22nd console script (`mnemosyne-resolver`). New module
+`mnemosyne_resolver` added to `py-modules`. CI install-smoke updated
+to 21 entry points + resolver imports.
+
+**Tests:** 200 → 213 green. 13 new (6 resolver, 4 scenario routing
+judges, 3 triage cluster rules). pyflakes clean.
+
+Honest framing: this is a small audit module, not "agent governance"
+or "the routing table for intelligence." It catches three real
+engineering hygiene problems that scale with skill count. We have 11
+builtins + 4 console-script wrappers today; the audit has no findings
+on the current registry, but it'll catch the next bad description
+before it ships.
+
 ## [0.3.4] — 2026-04-15 — fix CI failures (shellcheck + install-smoke surface)
 
 CI was failing across the day because:

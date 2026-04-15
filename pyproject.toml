@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.3.4"
+version = "0.3.5"
 description = "Meta-Harness-aligned observability + evaluation substrate for local-first LLM agents"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -69,6 +69,7 @@ mnemosyne-train        = "mnemosyne_train:_main"
 mnemosyne-batch        = "mnemosyne_batch:_main"
 mnemosyne-datagen      = "mnemosyne_datagen:_main"
 mnemosyne-avatar       = "mnemosyne_avatar:_main"
+mnemosyne-resolver     = "mnemosyne_resolver:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -123,6 +124,8 @@ py-modules = [
     # mnemosyne_ui ships static HTML/CSS/JS via mnemosyne-serve.
     # mnemosyne_avatar derives state from memory.db + events.jsonl.
     "mnemosyne_avatar",
+    # v0.3.5 routing-layer audit (Tan "Resolvers" 2026)
+    "mnemosyne_resolver",
 ]
 
 [tool.setuptools.package-data]

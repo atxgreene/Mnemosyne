@@ -175,7 +175,23 @@ def _cluster_id_for(event_type: str, tool: str | None, error_type: str | None) -
 def cluster_events(
     events_iter: Iterable[tuple[str, dict[str, Any]]],
 ) -> tuple[list[Cluster], dict[str, Any]]:
-    """Bucket error events into clusters. Returns (clusters, scan_stats)."""
+    """Bucket error events into clusters. Returns (clusters, scan_stats).
+
+    In addition to actual error events, this also synthesizes two
+    *resolver-decay* signals (Tan, "Resolvers" 2026):
+
+      no_tool_dispatched   — a model_call had a non-empty tools catalog
+                             but produced 0 tool_calls. Routing layer
+                             failed to match anything.
+      unknown_tool_called  — a tool_call event references a name not
+                             in the registry (model hallucinated a
+                             skill name). Strong signal that the
+                             description for the *real* skill is too
+                             vague to win.
+
+    Both surface as synthetic event_types in the cluster output so
+    severity scoring + reporting work without changes elsewhere.
+    """
     clusters: dict[str, Cluster] = {}
     stats = {
         "total_events": 0,
@@ -185,9 +201,24 @@ def cluster_events(
         "tool_call_errors": 0,
         "model_calls": 0,
         "model_call_errors": 0,
+        "no_tool_dispatched": 0,
+        "unknown_tool_called": 0,
         "runs": set(),
         "models": {},
     }
+
+    # Snapshot the live skill registry once (cheap; ~30 strings).
+    # Used to detect "unknown tool name" events without re-importing
+    # per event.
+    try:
+        from mnemosyne_skills import default_registry
+        _known_tool_names: set[str] = set(
+            default_registry(load_builtins=True,
+                             discover_commands=False,
+                             load_learned=False).names()
+        )
+    except Exception:
+        _known_tool_names = set()
 
     for run_id, ev in events_iter:
         stats["total_events"] += 1
@@ -199,10 +230,76 @@ def cluster_events(
             stats["tool_calls"] += 1
             if status == "error":
                 stats["tool_call_errors"] += 1
+            # Resolver-decay signal: model called a tool name that
+            # isn't registered. Treated as a synthetic error event.
+            tname = ev.get("tool")
+            if tname and _known_tool_names and tname not in _known_tool_names:
+                stats["unknown_tool_called"] += 1
+                synth = dict(ev)
+                synth["event_type"] = "unknown_tool_called"
+                synth["status"] = "error"
+                synth["error"] = {"type": "UnknownTool",
+                                  "message": f"tool {tname!r} not in registry"}
+                # Recursively cluster the synthetic event by reusing
+                # the existing cluster path below.
+                cid = _cluster_id_for("unknown_tool_called",
+                                       tname, "UnknownTool")
+                c = clusters.get(cid)
+                if c is None:
+                    c = Cluster(cluster_id=cid,
+                                event_type="unknown_tool_called",
+                                tool=tname, error_type="UnknownTool",
+                                first_seen_utc=ev.get("timestamp_utc"))
+                    clusters[cid] = c
+                c.events.append(synth)
+                c.runs.add(run_id)
+                ts = ev.get("timestamp_utc")
+                if ts:
+                    if c.first_seen_utc is None or ts < c.first_seen_utc:
+                        c.first_seen_utc = ts
+                    if c.last_seen_utc is None or ts > c.last_seen_utc:
+                        c.last_seen_utc = ts
+                stats["error_events"] += 1
         elif et == "model_call":
             stats["model_calls"] += 1
             if status == "error":
                 stats["model_call_errors"] += 1
+            # Resolver-decay signal: tools were on the table, model
+            # called none. Could be intentional (the answer didn't
+            # need a tool) but a *cluster* of these is suspicious —
+            # severity scoring lets the user separate noise from
+            # systematic routing failure.
+            args = ev.get("args") or {}
+            result = ev.get("result") or {}
+            had_tools = (isinstance(args, dict)
+                         and args.get("has_tools") is True)
+            called = (isinstance(result, dict)
+                      and (result.get("tool_calls_count") or 0) > 0)
+            if had_tools and not called and status != "error":
+                stats["no_tool_dispatched"] += 1
+                model_name = (args.get("model") or "?"
+                              if isinstance(args, dict) else "?")
+                cid = _cluster_id_for("no_tool_dispatched",
+                                       model_name, None)
+                c = clusters.get(cid)
+                if c is None:
+                    c = Cluster(cluster_id=cid,
+                                event_type="no_tool_dispatched",
+                                tool=model_name, error_type=None,
+                                first_seen_utc=ev.get("timestamp_utc"))
+                    clusters[cid] = c
+                synth = dict(ev)
+                synth["event_type"] = "no_tool_dispatched"
+                c.events.append(synth)
+                c.runs.add(run_id)
+                ts = ev.get("timestamp_utc")
+                if ts:
+                    if c.first_seen_utc is None or ts < c.first_seen_utc:
+                        c.first_seen_utc = ts
+                    if c.last_seen_utc is None or ts > c.last_seen_utc:
+                        c.last_seen_utc = ts
+                # Note: we do NOT increment error_events for this —
+                # it's an info-grade signal, not a hard failure.
         elif et == "identity_slip_detected":
             stats["identity_slips"] += 1
 
@@ -281,6 +378,15 @@ def severity_score(cluster: Cluster, stats: dict[str, Any]) -> dict[str, Any]:
         blast = 0.4
     elif cluster.event_type == "model_call":
         blast = 0.6
+    elif cluster.event_type == "unknown_tool_called":
+        # Hallucinated tool names = a real route is missing or its
+        # description is too vague. Fixable without a code change.
+        blast = 0.5
+    elif cluster.event_type == "no_tool_dispatched":
+        # Soft signal: tools were available, model called none. A
+        # cluster of these means the resolver layer is failing —
+        # less severe than a hard error but worth flagging.
+        blast = 0.35
 
     # fix_age: stale clusters that keep firing are worse than new ones (placeholder;
     # real implementation needs a report DB to know "previously reported and not

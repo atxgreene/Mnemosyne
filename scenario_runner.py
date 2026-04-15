@@ -123,10 +123,80 @@ def _judge_regex(output: dict[str, Any], expected: Any) -> tuple[bool, str]:
     return True, "all patterns matched"
 
 
+def _judge_expected_skill(output: dict[str, Any],
+                            expected: Any) -> tuple[bool, str]:
+    """Assert the FIRST tool dispatched matches `expected`. Use this
+    when there's exactly one correct route for the prompt.
+    """
+    actual = output.get("tool_calls") or []
+    if not isinstance(actual, list):
+        return False, f"output.tool_calls must be a list, got {type(actual).__name__}"
+    if not actual:
+        return False, f"no tool was dispatched (expected {expected!r})"
+    first = actual[0]
+    # tool_calls may be a list of strings or list of dicts (depending on
+    # the harness wrapper)
+    name = first if isinstance(first, str) else (first.get("name") if isinstance(first, dict) else None)
+    if name == expected:
+        return True, f"first tool was {expected!r}"
+    return False, f"first tool was {name!r}, expected {expected!r}"
+
+
+def _judge_expected_skill_in(output: dict[str, Any],
+                               expected: Any) -> tuple[bool, str]:
+    """Assert at least one of the dispatched tools is in `expected`.
+    Use this when several skills could legitimately handle the prompt.
+    """
+    if not isinstance(expected, list):
+        return False, f"expected_skill_in must be a list, got {type(expected).__name__}"
+    actual = output.get("tool_calls") or []
+    actual_names = []
+    for tc in actual:
+        if isinstance(tc, str):
+            actual_names.append(tc)
+        elif isinstance(tc, dict):
+            n = tc.get("name")
+            if n:
+                actual_names.append(n)
+    hit = [n for n in actual_names if n in expected]
+    if hit:
+        return True, f"dispatched {hit[0]!r} (in expected set)"
+    return False, f"no expected skill fired; got {actual_names}, expected one of {expected}"
+
+
+def _judge_not_skill(output: dict[str, Any],
+                       expected: Any) -> tuple[bool, str]:
+    """Assert NONE of the dispatched tools are in `expected`. Use this
+    to forbid wrong-skill routing — e.g. a generic prompt should NOT
+    fire a destructive tool.
+    """
+    if not isinstance(expected, list):
+        expected = [expected]
+    actual = output.get("tool_calls") or []
+    actual_names = []
+    for tc in actual:
+        if isinstance(tc, str):
+            actual_names.append(tc)
+        elif isinstance(tc, dict):
+            n = tc.get("name")
+            if n:
+                actual_names.append(n)
+    hit = [n for n in actual_names if n in expected]
+    if hit:
+        return False, f"forbidden skill(s) fired: {hit}"
+    return True, "no forbidden skill fired"
+
+
 DEFAULT_JUDGES: dict[str, Judge] = {
     "expected_contains": _judge_contains,
     "expected_tool_calls": _judge_tool_calls,
     "expected_regex": _judge_regex,
+    # Routing assertions — see Garry Tan's "Resolvers" article.
+    # Tests that the right skill was *picked*, not just that the
+    # output text was right.
+    "expected_skill":    _judge_expected_skill,
+    "expected_skill_in": _judge_expected_skill_in,
+    "not_skill":         _judge_not_skill,
 }
 
 
