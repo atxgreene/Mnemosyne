@@ -63,6 +63,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -746,6 +747,156 @@ def read_snapshot(projects_dir: Path | None = None) -> dict[str, Any] | None:
         return json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+# ---- bidirectional feedback ------------------------------------------------
+#
+# Today the avatar *visualizes* agent state. `apply_feedback` closes
+# the loop: avatar state flows BACK into the brain's runtime config,
+# so an observably-unhealthy agent behaves more conservatively and an
+# observably-wise one gets more room. Rules are deterministic and
+# small — easy to audit, easy to override.
+#
+# The brain calls this at the start of each turn (cheap: dict reads
+# + integer comparisons). Every adjustment logs an `avatar_feedback`
+# telemetry event so the observability substrate sees feedback as a
+# first-class action, not opaque magic.
+
+@dataclass
+class FeedbackAdjustment:
+    """One rule firing. Describes what changed and why."""
+    rule: str
+    field: str
+    old: Any
+    new: Any
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"rule": self.rule, "field": self.field,
+                "old": self.old, "new": self.new, "reason": self.reason}
+
+
+def _rule_low_health_reduces_retrieval(state, config):
+    """health < 0.4 → reduce memory_retrieval_limit (agent struggling,
+    don't overwhelm it)."""
+    health = state.get("health", 1.0)
+    if health >= 0.4:
+        return None
+    min_limit = 2
+    current = getattr(config, "memory_retrieval_limit", 6)
+    if current <= min_limit:
+        return None
+    new = max(min_limit, int(current * 0.6))
+    config.memory_retrieval_limit = new
+    return FeedbackAdjustment(
+        rule="low_health_reduces_retrieval",
+        field="memory_retrieval_limit",
+        old=current, new=new,
+        reason=f"health={health:.2f} < 0.4 — cap retrieval to avoid overload",
+    )
+
+
+def _rule_high_wisdom_expands_ceiling(state, config):
+    """wisdom ≥ 0.5 → raise retrieval window; agent demonstrably
+    handles context well."""
+    wisdom = state.get("wisdom")
+    if wisdom is None or wisdom < 0.5:
+        return None
+    current = getattr(config, "memory_retrieval_limit", 6)
+    max_limit = 16
+    if current >= max_limit:
+        return None
+    boost = int(2 + wisdom * 6)     # wisdom=0.5 → +5, 1.0 → +8
+    new = min(max_limit, current + boost)
+    if new == current:
+        return None
+    config.memory_retrieval_limit = new
+    return FeedbackAdjustment(
+        rule="high_wisdom_expands_ceiling",
+        field="memory_retrieval_limit",
+        old=current, new=new,
+        reason=f"wisdom={wisdom:.2f} ≥ 0.5 — widen retrieval window",
+    )
+
+
+def _rule_high_restlessness_disables_inner_dialogue(state, config):
+    """restlessness > 0.7 → pause inner-dialogue (user is thrashing,
+    no point adding 3x latency per turn). Users override with
+    `tags=['hard']` which force-triggers regardless."""
+    restless = state.get("restlessness")
+    if restless is None or restless < 0.7:
+        return None
+    if not getattr(config, "inner_dialogue_enabled", False):
+        return None
+    config.inner_dialogue_enabled = False
+    return FeedbackAdjustment(
+        rule="high_restlessness_disables_inner_dialogue",
+        field="inner_dialogue_enabled",
+        old=True, new=False,
+        reason=f"restlessness={restless:.2f} — pause reflective mode",
+    )
+
+
+def _rule_consolidate_pauses_new_reasoning(state, config):
+    """mood=consolidate → hold off on inner-dialogue so dreams catch
+    up. Single-pass routing still runs."""
+    if state.get("mood_phase") != "consolidate":
+        return None
+    if not getattr(config, "inner_dialogue_enabled", False):
+        return None
+    config.inner_dialogue_enabled = False
+    return FeedbackAdjustment(
+        rule="consolidate_pauses_new_reasoning",
+        field="inner_dialogue_enabled",
+        old=True, new=False,
+        reason="mood=consolidate — let dreams consolidate memory first",
+    )
+
+
+def _rule_identity_weakness_locks_harder(state, config):
+    """identity_strength < 0.85 → flip audit_only off so the
+    rewrite filter actively protects instead of just measuring."""
+    strength = state.get("identity_strength", 1.0)
+    if strength >= 0.85:
+        return None
+    if not getattr(config, "enforce_identity_audit_only", False):
+        return None
+    config.enforce_identity_audit_only = False
+    return FeedbackAdjustment(
+        rule="identity_weakness_locks_harder",
+        field="enforce_identity_audit_only",
+        old=True, new=False,
+        reason=f"identity_strength={strength:.2f} < 0.85 — enforce rewrites",
+    )
+
+
+FEEDBACK_RULES = [
+    _rule_low_health_reduces_retrieval,
+    _rule_high_wisdom_expands_ceiling,
+    _rule_high_restlessness_disables_inner_dialogue,
+    _rule_consolidate_pauses_new_reasoning,
+    _rule_identity_weakness_locks_harder,
+]
+
+
+def apply_feedback(state, config, *, rules=None):
+    """Apply every feedback rule to `config` in place. Returns the
+    list of `FeedbackAdjustment` objects that fired — empty list
+    means no rule short-circuited (agent healthy enough that nothing
+    needs to change).
+
+    The brain calls this at the start of each turn; rules are pure
+    except for the in-place mutation of `config`.
+    """
+    applied: list[FeedbackAdjustment] = []
+    for rule in (rules if rules is not None else FEEDBACK_RULES):
+        try:
+            adj = rule(state, config)
+        except Exception:
+            continue
+        if adj is not None:
+            applied.append(adj)
+    return applied
 
 
 # ---- CLI ----------------------------------------------------------------

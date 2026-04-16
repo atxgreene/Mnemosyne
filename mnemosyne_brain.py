@@ -183,6 +183,16 @@ class BrainConfig:
     # intend to train on.
     capture_for_training: bool = False
 
+    # Bidirectional avatar feedback: read the current avatar state at
+    # turn-start and let it *adjust this BrainConfig in place* — low
+    # health reduces retrieval, high wisdom expands ceiling, high
+    # restlessness disables inner dialogue, consolidate mood pauses
+    # deep reasoning, identity erosion locks harder. See
+    # mnemosyne_avatar.apply_feedback + FEEDBACK_RULES. Closes the
+    # loop: observable state influences actual behavior, not just
+    # visualization. Off by default; opt-in.
+    avatar_feedback: bool = False
+
 
 # ---- brain ------------------------------------------------------------------
 
@@ -243,6 +253,15 @@ class Brain:
             "turn_start",
             metadata={"turn_number": self._total_turns, **(metadata or {})},
         )
+
+        # Bidirectional avatar feedback: let observable agent state
+        # (health / wisdom / restlessness / mood / identity) adjust
+        # this turn's config before we build the prompt.
+        if self.config.avatar_feedback:
+            try:
+                self._apply_avatar_feedback(parent_evt=turn_evt)
+            except Exception:
+                pass  # feedback must never break a turn
 
         try:
             if self.consciousness and hasattr(self.consciousness, "pre_turn"):
@@ -612,6 +631,31 @@ class Brain:
         )
 
     # ---- dreams -------------------------------------------------------------
+
+    def _apply_avatar_feedback(self, *, parent_evt: str | None) -> None:
+        """Read current avatar state and let its rules mutate self.config.
+
+        Each adjustment logs an `avatar_feedback` telemetry event so the
+        observability substrate sees feedback as a first-class action.
+        Safe no-op if mnemosyne_avatar isn't importable.
+        """
+        try:
+            import mnemosyne_avatar as av_mod
+        except ImportError:  # pragma: no cover
+            return
+        try:
+            # use_cache=True is fine — the polling dashboard and this
+            # call share the same cache, so feedback reads come free.
+            state = av_mod.compute_state(use_cache=True)
+        except Exception:
+            return
+        adjustments = av_mod.apply_feedback(state, self.config)
+        for adj in adjustments:
+            self._log(
+                "avatar_feedback",
+                parent_event_id=parent_evt,
+                metadata=adj.to_dict(),
+            )
 
     def _maybe_dream(self) -> None:
         """Fire a dream-consolidation pass if L3 has enough material.

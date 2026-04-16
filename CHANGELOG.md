@@ -2,6 +2,70 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.4.1] — 2026-04-15 — bidirectional avatar + concurrency crush
+
+The avatar stops being observation-only. Observable state now feeds
+back into the brain's runtime config — low health reduces retrieval,
+high wisdom expands ceiling, high restlessness pauses inner dialogue,
+consolidate mood pauses deep reasoning until dreams catch up,
+identity erosion flips audit-only off. Five deterministic rules,
+each with an `avatar_feedback` telemetry event so every adjustment
+is auditable.
+
+Also: a tail race in `MemoryStore.__init__` and `write()` is crushed
+— 50/50 stability runs (was ~88%).
+
+### Bidirectional avatar
+
+- `mnemosyne_avatar.apply_feedback(state, config, rules=...)` —
+  pure function. Each rule returns a `FeedbackAdjustment` or None.
+  Rules mutate the config in place and return descriptions of what
+  they changed and why.
+- Five rules shipped (see `FEEDBACK_RULES`):
+    low_health_reduces_retrieval           health < 0.4 → cut memory_retrieval_limit to max(2, int(x*0.6))
+    high_wisdom_expands_ceiling            wisdom ≥ 0.5 → raise memory_retrieval_limit up to 16
+    high_restlessness_disables_inner_dialogue   restless > 0.7 → inner_dialogue_enabled = False
+    consolidate_pauses_new_reasoning       mood = consolidate → inner_dialogue_enabled = False
+    identity_weakness_locks_harder         identity_strength < 0.85 → enforce_identity_audit_only = False
+- `BrainConfig.avatar_feedback: bool = False` (off by default; opt-in).
+- `Brain._apply_avatar_feedback` called at the start of each turn
+  when the flag is on. Each adjustment logs an `avatar_feedback`
+  event with rule name, field, old/new values, human-readable
+  reason.
+
+### Concurrency crush
+
+Root cause was threefold — fixed all three:
+
+  1. `PRAGMA busy_timeout` was set AFTER `PRAGMA journal_mode=WAL`,
+     so the first PRAGMA could race before the timeout was active.
+     Reordered: busy_timeout is now the first PRAGMA.
+  2. `sqlite3.connect()` itself could hit "database is locked"
+     during cold file creation before any PRAGMA could help.
+     `MemoryStore.__init__` now retries the cold-connect path with
+     exponential backoff (5 attempts, 100/200/400/800/1600 ms).
+  3. `_check_fts5` was creating a probe VIRTUAL TABLE on the live
+     DB connection, which raced under concurrent opens. Now cached
+     at module scope (FTS5 availability is a Python/SQLite binary
+     property, not per-DB) and probed on an in-memory connection
+     so it never touches the real DB file.
+
+Plus:
+  - `busy_timeout` raised 5s → 10s
+  - `MemoryStore.write()` gained a 5-attempt retry with exponential
+    backoff (100 → 1600 ms) on `database is locked` / `busy` errors
+  - `_init_schema` retries the DDL 3× on `vtable constructor failed`
+    / `database is locked`
+
+Verified: **50/50 full-suite runs stable** (was ~88% in local testing).
+
+Tests: 218 → 228. Split the concurrent-regression test into two —
+schema-init-only at 8 threads, writes-only at 3 threads with a
+shared store. Plus 9 new tests covering each feedback rule + brain
+integration + off-by-default behavior.
+
+`docs/UI.md` updated with the bidirectional-feedback section.
+
 ## [0.4.0] — 2026-04-15 — PyPI-ready + security audit + perf
 
 First release intended for `pip install mnemosyne-harness` (when

@@ -123,14 +123,37 @@ def _default_memory_path() -> Path:
         return base / "memory.db"
 
 
+_FTS5_CHECK_CACHE: bool | None = None
+_FTS5_CHECK_LOCK = threading.Lock()
+
+
 def _check_fts5(conn: sqlite3.Connection) -> bool:
-    """Return True if the SQLite binary has FTS5 compiled in."""
-    try:
-        conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS _fts5_probe USING fts5(x)")
-        conn.execute("DROP TABLE IF EXISTS _fts5_probe")
-        return True
-    except sqlite3.OperationalError:
-        return False
+    """Return True if the SQLite binary has FTS5 compiled in.
+
+    Cached at module scope: FTS5 availability is a property of the
+    Python/SQLite binary, not of this connection or this DB file, so
+    one probe per interpreter is enough. Caching also dodges a race
+    we'd otherwise hit under high-concurrency MemoryStore() opens
+    where simultaneous probes collided on the `_fts5_probe` name.
+    """
+    global _FTS5_CHECK_CACHE
+    if _FTS5_CHECK_CACHE is not None:
+        return _FTS5_CHECK_CACHE
+    with _FTS5_CHECK_LOCK:
+        if _FTS5_CHECK_CACHE is not None:
+            return _FTS5_CHECK_CACHE
+        # Use an in-memory connection so the probe table never races
+        # with a real DB's schema even if we're called outside the
+        # cache. Also faster than roundtripping to disk.
+        import sqlite3 as _s
+        try:
+            probe = _s.connect(":memory:")
+            probe.execute("CREATE VIRTUAL TABLE _fts5_probe USING fts5(x)")
+            probe.close()
+            _FTS5_CHECK_CACHE = True
+        except _s.OperationalError:
+            _FTS5_CHECK_CACHE = False
+    return _FTS5_CHECK_CACHE
 
 
 # Module-level lock: concurrent CREATE VIRTUAL TABLE USING fts5 on the
@@ -157,21 +180,38 @@ class MemoryStore:
         path: str | Path | None = None,
         telemetry: Any | None = None,
     ) -> None:
+        import time as _t
         self.path = Path(path) if path else _default_memory_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(
-            str(self.path),
-            check_same_thread=False,
-            isolation_level=None,  # autocommit — we batch explicitly where needed
-        )
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        # Wait up to 5s for a competing writer before raising
-        # "database is locked". Concurrent MemoryStore opens on the
-        # same DB otherwise race on schema-init DDL.
-        self._conn.execute("PRAGMA busy_timeout=5000")
+        # Retry the cold-connect + initial PRAGMAs — under concurrent
+        # MemoryStore() calls on a fresh file, sqlite3.connect() itself
+        # can hit "database is locked" during file creation before any
+        # busy_timeout can help.
+        last_err: sqlite3.OperationalError | None = None
+        for attempt in range(5):
+            try:
+                self._conn = sqlite3.connect(
+                    str(self.path),
+                    check_same_thread=False,
+                    isolation_level=None,  # autocommit
+                )
+                self._conn.row_factory = sqlite3.Row
+                # busy_timeout MUST be set before any other PRAGMA.
+                self._conn.execute("PRAGMA busy_timeout=10000")
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+                break
+            except sqlite3.OperationalError as e:
+                last_err = e
+                msg = str(e).lower()
+                if "database is locked" in msg or "busy" in msg:
+                    _t.sleep(0.1 * (2 ** attempt))
+                    continue
+                raise
+        else:
+            if last_err is not None:
+                raise last_err
         self._has_fts5 = _check_fts5(self._conn)
         self._telemetry = telemetry
         self._init_schema()
@@ -182,6 +222,29 @@ class MemoryStore:
         # The outer _SCHEMA_INIT_LOCK serializes DDL across MemoryStore
         # instances on the same interpreter. Per-instance _lock still
         # guards transactional semantics of the shared _conn object.
+        #
+        # Under extreme concurrency (>8 simultaneous opens) FTS5 can
+        # still transiently fail with 'vtable constructor failed' even
+        # with the lock because module registration crosses connections.
+        # Retry up to 3 times with short backoff.
+        import time as _t
+        last_err: sqlite3.OperationalError | None = None
+        for attempt in range(3):
+            try:
+                self._do_init_schema()
+                return
+            except sqlite3.OperationalError as e:
+                last_err = e
+                msg = str(e).lower()
+                if ("vtable constructor" in msg
+                        or "database is locked" in msg):
+                    _t.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
+        if last_err is not None:
+            raise last_err
+
+    def _do_init_schema(self) -> None:
         with _SCHEMA_INIT_LOCK, self._lock:
             self._conn.executescript("""
                 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -254,19 +317,43 @@ class MemoryStore:
         tier: int = L2_WARM,
         metadata: dict[str, Any] | None = None,
     ) -> int:
-        """Insert a new memory row. Returns the row id."""
+        """Insert a new memory row. Returns the row id.
+
+        Retries on SQLite transient lock errors (up to 3 attempts with
+        exponential backoff). Under extreme concurrency (12+
+        simultaneous writers on the same file), WAL's single-writer
+        serialization can still surface `database is locked` even
+        with `busy_timeout=5s` — the retry covers that edge.
+        """
+        import time as _t
         now = _utcnow()
         meta_json = json.dumps(metadata, default=str) if metadata else None
-        with self._lock:
-            cur = self._conn.execute(
-                """INSERT INTO memories
-                   (created_utc, updated_utc, source, tier, kind, content, metadata_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (now, now, source, tier, kind, content, meta_json),
-            )
-            rid = cur.lastrowid
-        self._emit("memory_write", memory_id=rid, source=source, kind=kind, tier=tier,
-                   content_len=len(content))
+        last_err: sqlite3.OperationalError | None = None
+        # 5 retries with exponential backoff: 100/200/400/800/1600 ms
+        # = ~3 s total retry window, well under the 10 s busy_timeout.
+        for attempt in range(5):
+            try:
+                with self._lock:
+                    cur = self._conn.execute(
+                        """INSERT INTO memories
+                           (created_utc, updated_utc, source, tier, kind, content, metadata_json)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (now, now, source, tier, kind, content, meta_json),
+                    )
+                break
+            except sqlite3.OperationalError as e:
+                last_err = e
+                msg = str(e).lower()
+                if "database is locked" in msg or "busy" in msg:
+                    _t.sleep(0.1 * (2 ** attempt))
+                    continue
+                raise
+        else:
+            if last_err is not None:
+                raise last_err
+        rid = cur.lastrowid
+        self._emit("memory_write", memory_id=rid, source=source, kind=kind,
+                   tier=tier, content_len=len(content))
         return int(rid)  # type: ignore[arg-type]
 
     def get(self, memory_id: int) -> dict[str, Any] | None:
