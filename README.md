@@ -1,92 +1,148 @@
-# Mnemosyne Setup
+# Mnemosyne
 
-Reproducible bootstrap for the Mnemosyne local-agent stack on WSL2 / Ubuntu / Linux.
+**A cognitive OS for local-first agents. Stdlib only. One pip install away.**
 
-This repo is a **`pip install -e .`-able Python package** that wraps the Mnemosyne agent stack with a full harness-deployment + observability + evaluation suite. Zero runtime dependencies beyond the Python stdlib. Six console commands, nine library modules, plus shell scripts for bootstrap and wizard flows.
+*All five rows of the [cognitive-OS checklist](./docs/COGNITIVE_OS.md) are ✓ as of v0.7.0 — each backed by a [verify command](./docs/VISION.md). Not marketing; audit it yourself.*
 
-**Deployment layer:**
+![dashboard](docs/dashboard.png)
 
-| Script | Role |
+```sh
+pip install mnemosyne-harness
+mnemosyne-serve &                           # daemon + dashboard
+open http://127.0.0.1:8484/ui              # avatar evolves in real time
+```
+
+See [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) for the 10-line first conversation.
+
+## Why this exists
+
+Most agent frameworks pull in 200+ dependencies, force you onto one model
+provider, and treat the agent as a black box. Mnemosyne goes the other way.
+
+| Differentiator | Concrete |
 |---|---|
-| `install-mnemosyne.sh` | Unattended bootstrap. Installs Ollama, pulls a model, clones both upstream repos, builds a Python venv, smoke-tests the imports. Idempotent. |
-| `mnemosyne-wizard.sh` | Interactive post-install wizard (whiptail TUI with text fallback). Six steps: LLM backend, Telegram, Slack, Obsidian, Notion, write `~/projects/mnemosyne/.env`. |
-| `validate-mnemosyne.sh` | Health-check. Runs four checks (Ollama daemon, model present, Python imports, agent CLI loads) and exits non-zero on failure. Useful for `make check` / CI. |
+| **Stdlib-only core** | Zero runtime dependencies. `pip install mnemosyne-harness` pulls *nothing* from PyPI. The whole framework imports from Python's standard library. Auditable in an afternoon. |
+| **19 backends through one API** | Ollama, LM Studio, OpenAI, Anthropic, OpenRouter, Together, Fireworks, Groq, DeepSeek, Cerebras, Hyperbolic, Perplexity, Novita, Nous, Google, xAI, Mistral, Cohere, vLLM, TGI. One `Backend(provider="…", default_model="…")` call. |
+| **4-layer identity lock** | Whether the model is Qwen, Claude, or GPT-4, the agent identifies as Mnemosyne. Measured against a 40-prompt jailbreak suite (`scenarios/jailbreak.jsonl`). |
+| **Evolving avatar dashboard** | Browser dashboard at `/ui` whose SVG avatar visualizes 16 derived agent traits in real time. Every visual property maps to one observable number — no opaque "personality engine." |
+| **Hermes-compatible trajectories** | Captured turns export to ShareGPT JSONL byte-for-byte matching NousResearch/hermes-agent. Drop into Unsloth or Axolotl for LoRA fine-tuning unchanged. |
+| **Meta-Harness loop closed end-to-end** | `triage → proposer → apply → measure`. The agent observes its own failures and proposes its own fixes — no external orchestrator. |
+| **Local-first storage** | SQLite + FTS5 memory, JSONL events, markdown skills. Your `~/projects/mnemosyne/` is a directory you own. If Mnemosyne disappeared tomorrow, your knowledge survives as plain files. |
+| **Honest framing** | We do not claim AGI. `docs/ROADMAP.md` splits shipped vs. experimental vs. research vs. aspirational. Every "shipped" claim has test coverage. |
 
-**Skill helpers** (interface-agnostic, Python stdlib only):
-
-| Script | Role |
+| Resting | Active |
 |---|---|
-| `obsidian-search.py` | Obsidian vault helper. `search` / `read` / `list-recent` subcommands, read-only, path-traversal safe, JSON or human output. Uses ripgrep if available, pure-Python fallback. See [`SETUP.md`](./SETUP.md#obsidian-skill). |
-| `notion-search.py` | Same shape as `obsidian-search.py`, backed by the Notion API. Read-only, Bearer-auth via `NOTION_API_KEY` env var. See [`SETUP.md`](./SETUP.md#notion-skill). |
+| ![rest](docs/avatar-rest.png) | ![active](docs/avatar-active.png) |
 
-**Harness observability** (see [`SETUP.md`](./SETUP.md#harness-observability) for the architecture — inspired directly by the Stanford Meta-Harness paper, 2026):
+## Quickstart (10 lines)
 
-| Script | Role |
-|---|---|
-| `harness_telemetry.py` | Observability library + experiments-directory convention. `create_run` / `finalize_run` / `TelemetrySession` / `@trace` decorator. Secrets are redacted by key name at write time. Events are written raw (no summarization — deliberately; see the paper's "compressed feedback is the failure mode" argument). |
-| `mnemosyne-experiments.py` | CLI over the experiments tree. `list` / `show` / `top-k` / `pareto` / `diff` / `events` subcommands. Implements the six operations the Meta-Harness paper recommends for navigating a run history. |
-| `environment-snapshot.py` | Pre-computes `$PROJECTS_DIR` / `.env` keys / Ollama models / venv / skills / vault / disk into a single markdown preamble or JSON dict. Mirrors the Meta-Harness "Terminal-Bench 2" optimization: inject the environment into the first LLM call instead of letting the agent discover it across 2–4 exploratory turns. **Never emits `.env` values.** |
-| `test-harness.sh` | End-to-end integration test. 23 assertions covering all four observability components — run creation, event logging, secret redaction, CLI semantics (list, top-k with direction, Pareto frontier with multi-axis dominance, diff, events filtering), environment snapshot output + secret safety. Safe to run repeatedly, no network. |
+```python
+from mnemosyne_brain import Brain, BrainConfig
+from mnemosyne_memory import MemoryStore
+from mnemosyne_models import Backend
+from mnemosyne_skills import default_registry
 
-The two Python packages live in their own repos and are cloned by the bootstrap:
-
-- [`atxgreene/eternal-context`](https://github.com/atxgreene/eternal-context) — base agent (ICMS 3-tier memory, SDI selection, tool registry, channel adapters)
-- [`atxgreene/fantastic-disco`](https://github.com/atxgreene/fantastic-disco) — `mnemosyne-consciousness` extensions (TurboQuant, metacognition, dream consolidation, autobiography, behavioral coupling)
-
-Override either repo URL via `ETERNAL_REPO=` / `FANTASTIC_REPO=` / `FANTASTIC_BRANCH=` env vars when running `install-mnemosyne.sh` to track a fork.
-
-## Quick start
-
-```bash
-git clone https://github.com/atxgreene/sturdy-doodle.git ~/mnemosyne-setup
-cd ~/mnemosyne-setup
-bash install-mnemosyne.sh        # clones + builds venv + pip install -e . of this repo
-bash mnemosyne-wizard.sh         # configure Telegram / Slack / Obsidian / Notion
-bash validate-mnemosyne.sh       # confirm everything's healthy
+backend = Backend(provider="ollama", default_model="qwen3.5:9b")   # or any of 19 providers
+brain = Brain(
+    config=BrainConfig(inner_dialogue_enabled=True, dreams_after_n_turns=50),
+    memory=MemoryStore(),
+    skills=default_registry(),
+    backend=backend,
+)
+print(brain.turn("Plan a database migration for production.", metadata={"tags": ["hard"]}).text)
 ```
 
-After the install, these commands are on `$PATH` inside the venv:
+The brain handles memory retrieval, tool dispatch, identity enforcement, inner dialogue on tagged turns, and dream consolidation on cadence. Every action is logged as a telemetry event you can inspect with `mnemosyne-experiments`.
+
+## What's in this repo
+
+- **Agent core.** `mnemosyne_brain` (routing), `mnemosyne_memory` (SQLite + FTS5, L1/L2/L3), `mnemosyne_skills` (agentskills.io-compatible), `mnemosyne_models` (19 providers, streaming), `mnemosyne_identity` (4-layer lock).
+- **Self-improvement loop.** `mnemosyne_triage` (error clustering + severity) → `mnemosyne_proposer` (rule-based change proposals) → `mnemosyne_apply` (execute + measure). Closed end-to-end.
+- **Consciousness primitives.** `mnemosyne_dreams` (offline memory consolidation), `mnemosyne_inner` (Planner → Critic → Doer → Evaluator), `mnemosyne_goals` (persistent TODO across sessions).
+- **Observability substrate.** `harness_telemetry` (raw events, secret redaction), `harness_sweep`, `scenario_runner`, `mnemosyne_experiments` (Pareto frontier, cost rollup).
+- **Integrations.** `mnemosyne_mcp` (Model Context Protocol, both directions), `mnemosyne_embeddings` (optional sentence-transformers), `obsidian_search`, `notion_search`.
+- **Daemon.** `mnemosyne_serve` — one long-running process that owns the memory store and runs dream / proposer / apply cron threads.
+- **Deployment.** `install-mnemosyne.sh`, `mnemosyne-wizard.sh`, `validate-mnemosyne.sh`, `test-harness.sh`, `mnemosyne-dashboard.sh`.
+
+## Read these next
+
+- [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) — **start here.** 10 lines from `pip install` to first conversation.
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — what's shipped vs experimental vs research vs aspirational. Honest.
+- [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, audit findings, defenses, hardening guide.
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — system design, four-layer stack, DeltaNet inflection point, why-this-over-Langfuse.
+- [`docs/UI.md`](./docs/UI.md) — dashboard visual contract and avatar's 16 derived traits.
+- [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) — methodology + instrumentation-overhead reference numbers.
+- [`docs/LOCAL_MODELS.md`](./docs/LOCAL_MODELS.md) — context-window math + model choice guide for Ollama.
+- [`docs/TRAINING.md`](./docs/TRAINING.md) — fine-tune a LoRA adapter from your captured conversations.
+- [`docs/DEMO.md`](./docs/DEMO.md) — captured transcript of `./demo.sh`.
+- [`RELEASE.md`](./RELEASE.md) — maintainer's release procedure (PyPI + GitHub).
+- [`CHANGELOG.md`](./CHANGELOG.md) — version-by-version record.
+
+## Verify anything on this page
+
+```sh
+pip install -e .
+python3 tests/test_all.py          # all unit tests, <2s on laptops
+bash test-harness.sh                # 29 end-to-end integration assertions
+./demo.sh                           # 16-section captured transcript
+./validate-mnemosyne.sh             # environment health check
+```
+
+## Deployment path
+
+```sh
+bash install-mnemosyne.sh        # clones eternal-context + fantastic-disco, builds venv, pip install -e .
+bash mnemosyne-wizard.sh         # interactive .env setup: LLM / Telegram / Slack / Obsidian / Notion
+bash validate-mnemosyne.sh       # confirm healthy
+mnemosyne-serve &                # optional: long-running daemon with dream + proposer cron
+```
+
+After install, these commands are on `$PATH`:
 
 ```
-mnemosyne-experiments   # list / show / top-k / pareto / diff / events / aggregate
-mnemosyne-pipeline      # observe → evaluate → sweep → compare → inspect in one shot
-environment-snapshot    # first-turn environment preamble (markdown or --json)
-obsidian-search         # search / read / list-recent against your vault
-notion-search           # same shape, backed by the Notion API
-harness-telemetry       # library smoke test
+mnemosyne-experiments   list / show / top-k / pareto / diff / events / aggregate / cost
+mnemosyne-pipeline      observe → evaluate → sweep → compare → inspect in one shot
+mnemosyne-memory        write / search / stats (CLI over MemoryStore)
+mnemosyne-models        list / current / ping / info / pulled (CLI over the 19 backends)
+mnemosyne-triage        scan / daily / weekly / show
+mnemosyne-proposer      generate change proposals from triage clusters
+mnemosyne-apply         execute accepted proposals and measure impact
+mnemosyne-dreams        offline memory consolidation pass
+mnemosyne-scengen       auto-generate regression scenarios from events.jsonl
+mnemosyne-goals         manage the persistent goal stack
+mnemosyne-mcp           serve skills as MCP tools or attach external MCP servers
+mnemosyne-serve         long-running daemon
+environment-snapshot    first-turn environment preamble
+obsidian-search         search / read / list-recent against your vault
+notion-search           same shape, backed by the Notion API
+harness-telemetry       library smoke test
 ```
 
-Then boot the agent:
+## Not AGI
 
-```bash
-source ~/projects/mnemosyne/.venv/bin/activate
-set -a; . ~/projects/mnemosyne/.env; set +a
-cd ~/projects/mnemosyne/eternal-context/skills/eternal-context
-python -m eternalcontext
-```
-
-Verify the observability stack is healthy (no network required, runs in a sandbox `/tmp` dir):
-
-```bash
-bash test-harness.sh           # 29 integration assertions
-python3 tests/test_all.py      # 49 unit tests (1 second)
-```
-
-Full walkthrough — channel setup, the Obsidian/Notion skills, harness observability architecture, security model — in [`SETUP.md`](./SETUP.md).
+Mnemosyne is engineering primitives for building usable local-first agents that are observable, tunable, and identity-stable. It is not a claim about emergent general intelligence. The path to AGI runs through the model inside the brain, the training objective, and the test-time compute budget — Mnemosyne makes it cheaper to experiment with whatever research finds, but it is not the path itself. See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the honest split.
 
 ## Security TL;DR
 
-- **`.env` lives outside both upstream repos** (`~/projects/mnemosyne/.env`) and is `.gitignore`d here. Mode `600`. The wizard creates it via `umask 077` so there's no TOCTOU window where the file is briefly world-readable.
-- **Channel tokens never appear in `argv`.** Telegram, Slack, and Notion API calls all go through `python3 urllib.request` with the token passed as an env var (`_TG_TOKEN`, `_SLACK_TOKEN`, `_NOTION_TOKEN`) — not via curl URLs or command-line arguments. Verified: 1125 `/proc/<pid>/cmdline` snapshots across a wizard run with three fake secrets, zero leaks.
-- **No third-party shell installers** beyond the official Ollama installer (`https://ollama.com/install.sh`). All Python deps come from PyPI.
-- **No telemetry, no callbacks, no auto-updates.**
-- **No LICENSE shipped by default** — pick one before publishing your fork. MIT is a reasonable default for tooling.
+- `.env` lives outside both upstream repos (`~/projects/mnemosyne/.env`), mode `600`, created via `umask 077` (no TOCTOU).
+- Channel tokens never appear in `argv`. Audited: 1125 `/proc/<pid>/cmdline` snapshots, zero leaks.
+- No third-party shell installers beyond official Ollama.
+- No telemetry, no callbacks, no auto-updates.
 
-Full security model in [`SETUP.md`](./SETUP.md#security-model).
+Full model in [`SETUP.md`](./SETUP.md#security-model).
+
+## Companion repos
+
+Cloned by `install-mnemosyne.sh`:
+
+- [`atxgreene/eternal-context`](https://github.com/atxgreene/eternal-context) — base agent (ICMS, SDI, tool registry, channel adapters).
+- [`atxgreene/fantastic-disco`](https://github.com/atxgreene/fantastic-disco) — `mnemosyne-consciousness` extensions (TurboQuant, metacognition, autobiography).
+
+Override via `ETERNAL_REPO=` / `FANTASTIC_REPO=` / `FANTASTIC_BRANCH=` env vars to track a fork.
 
 ## Requirements
 
-- WSL2 Ubuntu 24.04 (or any Debian-ish Linux with `python3 >= 3.11`, `python3-venv`, `git`, `curl`)
+- WSL2 Ubuntu 24.04 or any Debian-ish Linux with `python3 >= 3.11`, `python3-venv`, `git`, `curl`
 - ~10 GB free disk for the model + venv
-- Optional: `whiptail` for the TUI wizard (pre-installed on most Ubuntu); `--text` mode works without it
-- Optional: GPU passthrough for faster inference (CPU works, just slower; use `CPU_TORCH=1` to skip the ~2GB CUDA wheels)
+- Optional: `whiptail` for the TUI wizard; `--text` mode works without it
+- Optional: GPU passthrough for faster inference (CPU works; `CPU_TORCH=1` skips the ~2GB CUDA wheels)

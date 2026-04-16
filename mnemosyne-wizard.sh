@@ -321,26 +321,48 @@ PY
 }
 
 # ---- header -------------------------------------------------------------------
+# Detect existing configuration so we can show users exactly what will change.
+_count_existing_keys() {
+  if [ -f "$ENV_FILE" ]; then
+    grep -cE '^[A-Z_]+=' "$ENV_FILE" 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
+}
+_existing_count=$(_count_existing_keys)
+
 if [ "$TUI" = 1 ]; then
-  whiptail --title "$WIZ_TITLE" --msgbox \
-"This wizard configures channel credentials for Mnemosyne and writes them to:
+  _welcome_body="Welcome to the Mnemosyne setup wizard.
 
-  $ENV_FILE
+Six steps:
+  1. LLM backend (Ollama host + model)
+  2. Telegram channel
+  3. Slack channel
+  4. Obsidian skill (vault path)
+  5. Notion integration
+  6. Write .env atomically (mode 600)
 
-Existing values are reused unless you overwrite them. The .env file will
-be created with mode 600 (owner-readable only). Press Esc/Cancel anytime
-to abort." 16 70
+Target file:  $ENV_FILE
+Existing keys: $_existing_count
+
+Answering 'no' to any step preserves the existing value (never removes).
+Keeping an existing token skips live revalidation (network-flake safe).
+
+Press Esc/Cancel anytime to abort without writing."
+  whiptail --title "$WIZ_TITLE" --msgbox "$_welcome_body" 22 74
 else
   clear 2>/dev/null || true
   hr
   printf "%s  Mnemosyne setup wizard%s\n" "$c_green" "$c_off"
   hr
   echo
-  echo "Configures channel credentials and writes them to:"
-  echo "  $ENV_FILE"
+  printf "  Six steps: LLM ➜ Telegram ➜ Slack ➜ Obsidian ➜ Notion ➜ Write\n"
   echo
-  echo "Existing values are reused unless you overwrite them. ^C anytime to abort."
-  echo "Mode: $([ "$TUI" = 1 ] && echo whiptail || echo text)"
+  echo "  Target file:   $ENV_FILE"
+  echo "  Existing keys: $_existing_count"
+  echo
+  echo "  Mode: $([ "$TUI" = 1 ] && echo whiptail || echo text)"
+  echo "  Answering 'no' preserves existing values. ^C to abort."
   echo
 fi
 
@@ -832,4 +854,42 @@ else
   echo
   printf '%s\n' "$DONE_MSG"
   echo
+fi
+
+# ---- offer to launch mnemosyne-serve + open dashboard -----------------------
+
+open_url() {
+  # Cross-platform URL opener. Silent if nothing works.
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$1" >/dev/null 2>&1 &
+  elif command -v open >/dev/null 2>&1; then
+    open "$1" >/dev/null 2>&1 &
+  elif command -v cmd.exe >/dev/null 2>&1; then
+    cmd.exe /c start "$1" >/dev/null 2>&1 &
+  fi
+}
+
+if tui_yesno "Launch dashboard?" \
+    "Start mnemosyne-serve now and open http://127.0.0.1:8484/ui in your browser?"; then
+  # Prefer the installed console script if the venv is active; else fall
+  # back to module invocation with sys.path set up.
+  if command -v mnemosyne-serve >/dev/null 2>&1; then
+    (mnemosyne-serve --host 127.0.0.1 --port 8484 \
+        --dream-every 30m --triage-every 10m --propose-every 30m \
+        >/tmp/mnemosyne-serve.log 2>&1 &
+    )
+    # Give it a moment to bind.
+    sleep 1.5
+    if curl -fsS http://127.0.0.1:8484/healthz >/dev/null 2>&1; then
+      ok "mnemosyne-serve listening on :8484"
+      open_url "http://127.0.0.1:8484/ui"
+    else
+      printf 'note: serve did not come up cleanly; tail /tmp/mnemosyne-serve.log\n' >&2
+    fi
+  else
+    # shellcheck disable=SC2016  # we want literal $PATH in the user message
+    printf 'note: mnemosyne-serve not on $PATH; activate the venv first:\n' >&2
+    printf '  source %s/.venv/bin/activate\n' "$MNEMOSYNE_PROJECTS_DIR" >&2
+    printf '  mnemosyne-serve\n' >&2
+  fi
 fi

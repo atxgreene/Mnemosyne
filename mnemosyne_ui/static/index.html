@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mnemosyne</title>
+  <link rel="stylesheet" href="/ui/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%2350aabd'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <span class="brand-name">Mnemosyne</span>
+      <span class="brand-version" id="version">v0.3.0</span>
+    </div>
+    <div class="status" id="status-pills">
+      <span class="pill" id="pill-mood">…</span>
+      <span class="pill" id="pill-mem">memory: …</span>
+      <span class="pill" id="pill-skills">skills: …</span>
+      <span class="pill" id="pill-goals">goals: …</span>
+      <span class="pill" id="pill-identity">identity: …</span>
+    </div>
+  </header>
+
+  <main class="grid">
+
+    <!-- avatar / habitat (left, full height) -->
+    <section class="panel panel-avatar">
+      <h2>Avatar <span class="hint" id="avatar-mood-hint">resting</span></h2>
+      <div class="avatar-stage" id="avatar-stage">
+        <!-- avatar.js renders an SVG inside #avatar-stage -->
+      </div>
+      <div class="trait-grid" id="trait-grid">
+        <!-- populated by app.js -->
+      </div>
+    </section>
+
+    <!-- chat panel -->
+    <section class="panel panel-chat">
+      <h2>Chat
+        <span class="hint">POST /turn · BrainConfig defaults</span>
+      </h2>
+      <div class="chat-log" id="chat-log">
+        <div class="chat-msg system">
+          <div class="chat-bubble">
+            Hello. I'm Mnemosyne. Type a message below to talk. The
+            avatar to the left reflects my state in real time.
+          </div>
+        </div>
+      </div>
+      <form class="chat-form" id="chat-form">
+        <textarea id="chat-input"
+                  placeholder="Ask anything (Shift+Enter for newline)…"
+                  rows="2"></textarea>
+        <div class="chat-actions">
+          <label class="chat-toggle">
+            <input type="checkbox" id="hard-toggle" />
+            <span>hard turn (inner dialogue)</span>
+          </label>
+          <button type="submit" id="send-btn">Send</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- live event stream -->
+    <section class="panel panel-events">
+      <h2>Events
+        <span class="hint" id="events-status">connecting…</span>
+      </h2>
+      <ul class="event-stream" id="event-stream"></ul>
+    </section>
+
+    <!-- goals -->
+    <section class="panel panel-goals">
+      <h2>Goals <span class="hint">persistent across sessions</span></h2>
+      <ul class="goal-list" id="goal-list"></ul>
+      <form class="goal-form" id="goal-form">
+        <input type="text" id="goal-input" placeholder="Add a goal…"
+               maxlength="200" />
+        <select id="goal-priority">
+          <option value="1">P1</option>
+          <option value="2">P2</option>
+          <option value="3" selected>P3</option>
+          <option value="4">P4</option>
+          <option value="5">P5</option>
+        </select>
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <!-- memory -->
+    <section class="panel panel-memory">
+      <h2>Memory tiers
+        <span class="hint">L1 hot · L2 warm · L3 cold</span>
+      </h2>
+      <div class="memory-bars" id="memory-bars"></div>
+      <div class="memory-numbers" id="memory-numbers"></div>
+    </section>
+
+    <!-- memory browser -->
+    <section class="panel panel-membrowse">
+      <h2>Memory browser
+        <span class="hint">FTS5 search across all memory tiers</span>
+      </h2>
+      <form class="mb-form" id="mb-form">
+        <input type="text" id="mb-input"
+               placeholder="Search memories (e.g. 'dark mode', 'meeting')…"
+               autocomplete="off" />
+        <select id="mb-tier" title="Tier filter">
+          <option value="">all</option>
+          <option value="1">L1 hot</option>
+          <option value="2">L1+L2</option>
+          <option value="3">L1+L2+L3</option>
+        </select>
+        <button type="submit">Find</button>
+      </form>
+      <ul class="mb-results" id="mb-results"></ul>
+    </section>
+
+  </main>
+
+  <script src="/ui/static/avatar.js"></script>
+  <script src="/ui/static/app.js"></script>
+</body>
+</html>

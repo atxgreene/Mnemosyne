@@ -291,7 +291,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
     a_dir = ht.run_path(args.run_a, Path(args.projects_dir) if args.projects_dir else None)
     b_dir = ht.run_path(args.run_b, Path(args.projects_dir) if args.projects_dir else None)
     if not a_dir.is_dir() or not b_dir.is_dir():
-        print(f"diff: one or both runs not found", file=sys.stderr)
+        print("diff: one or both runs not found", file=sys.stderr)
         return 3
 
     a_meta = json.loads((a_dir / "metadata.json").read_text(encoding="utf-8"))
@@ -569,7 +569,7 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
     for et in sorted(event_type_counts):
         print(f"  {et:<14} {event_type_counts[et]}")
     print()
-    print(f"## overall tool_call stats")
+    print("## overall tool_call stats")
     print(f"  calls:        {all_tool_calls}")
     print(f"  ok:           {all_ok}")
     print(f"  errors:       {all_errors}")
@@ -579,7 +579,7 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
         print(f"  duration_ms:  avg={d['avg']:.1f}  p50={d['p50']:.1f}  "
               f"p95={d['p95']:.1f}  p99={d['p99']:.1f}  total={d['total']:.1f}")
     print()
-    print(f"## per-tool")
+    print("## per-tool")
     print(f"  {'tool':<28}  {'calls':>6}  {'ok':>6}  {'err':>6}  "
           f"{'rate':>7}  {'avg_ms':>8}  {'p95_ms':>8}")
     for tool, v in stats.items():
@@ -652,6 +652,344 @@ def _ascii_scatter(
     return "\n".join(lines)
 
 
+# ---- cost: token-usage → USD rollup ----------------------------------------
+
+def cmd_cost(args: argparse.Namespace) -> int:
+    """Estimate USD cost from `model_call` events in one run or all runs.
+
+    Reads `usage` from each model_call event and prices it using
+    `mnemosyne_models.DEFAULT_PRICING`. Unknown models get zero cost
+    unless --price-override is supplied.
+    """
+    import mnemosyne_models as mm_models
+
+    pd = Path(args.projects_dir) if args.projects_dir else None
+    override: dict[str, float] | None = None
+    if args.price_override:
+        try:
+            override = json.loads(args.price_override)
+        except json.JSONDecodeError as e:
+            print(f"cost: invalid --price-override JSON: {e}", file=sys.stderr)
+            return 2
+
+    if args.run_id:
+        run_ids = [args.run_id]
+    else:
+        run_ids = [r["run_id"] for r in ht.list_runs(pd)]
+
+    totals: dict[str, dict[str, float]] = {}
+    grand_total = 0.0
+    for rid in run_ids:
+        try:
+            rd = ht.run_path(rid, pd)
+        except Exception:
+            continue
+        events_file = rd / "events.jsonl"
+        if not events_file.exists():
+            continue
+        with events_file.open(encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("event_type") != "model_call":
+                    continue
+                result = e.get("result") or {}
+                usage = result.get("usage")
+                args_ = e.get("args") or {}
+                model = args_.get("model") or ""
+                provider = args_.get("provider") or ""
+                key = f"{provider}:{model}" if provider else model
+                c = mm_models.cost_for(model, usage, price_override=override)
+                if c["total_usd"] <= 0 and not override:
+                    continue
+                slot = totals.setdefault(key, {
+                    "prompt_usd": 0.0, "completion_usd": 0.0, "total_usd": 0.0,
+                    "prompt_tokens": 0, "completion_tokens": 0, "calls": 0,
+                })
+                slot["prompt_usd"] += c["prompt_usd"]
+                slot["completion_usd"] += c["completion_usd"]
+                slot["total_usd"] += c["total_usd"]
+                slot["prompt_tokens"] += (usage or {}).get("prompt_tokens", 0)
+                slot["completion_tokens"] += (usage or {}).get("completion_tokens", 0)
+                slot["calls"] += 1
+                grand_total += c["total_usd"]
+
+    if args.json:
+        _emit_json({
+            "scope": args.run_id or "all_runs",
+            "grand_total_usd": round(grand_total, 6),
+            "by_model": totals,
+        })
+        return 0
+
+    if not totals:
+        print("cost: no priced model_call events found "
+              "(local models are $0; pass --price-override for unknown models)")
+        return 0
+
+    print(f"{'model':<40} {'calls':>6} {'in_toks':>10} {'out_toks':>10} "
+          f"{'total_usd':>10}")
+    for key, v in sorted(totals.items(), key=lambda kv: -kv[1]["total_usd"]):
+        print(f"  {key:<38} {v['calls']:>6} "
+              f"{int(v['prompt_tokens']):>10} {int(v['completion_tokens']):>10} "
+              f"${v['total_usd']:>9.4f}")
+    print(f"  {'─' * 76}")
+    print(f"  {'TOTAL':<38} {'':>6} {'':>10} {'':>10} ${grand_total:>9.4f}")
+    return 0
+
+
+# ---- browse: interactive TUI ------------------------------------------------
+
+def cmd_browse(args: argparse.Namespace) -> int:
+    """Interactive run browser using whiptail (with text fallback).
+
+    Main menu lets you:
+      - pick a run → view its details
+      - enter compare mode → pick two runs to diff
+      - view aggregate stats for a run
+      - view the Pareto frontier (with ASCII plot)
+      - quit
+
+    Every action is a new whiptail screen; the menu returns afterwards so
+    you can keep exploring. Ctrl-C or "quit" exits.
+    """
+    import shutil as _shutil
+    import subprocess as _subprocess
+
+    has_whiptail = _shutil.which("whiptail") is not None
+    if not has_whiptail:
+        print("browse: whiptail not installed — falling back to text mode")
+        return _browse_text(args)
+
+    runs = list(ht.list_runs(projects_dir=args.projects_dir))
+    if not runs:
+        _subprocess.run(["whiptail", "--title", "Mnemosyne experiments",
+                         "--msgbox", "No runs found in the experiments directory.", "10", "50"])
+        return 0
+
+    while True:
+        main_menu = [
+            ("view",    "View a single run's details"),
+            ("aggregate", "Per-tool statistics for a run"),
+            ("diff",    "Diff two runs side by side"),
+            ("pareto",  "Pareto frontier on accuracy x latency"),
+            ("top-k",   "Top-k runs by a metric"),
+            ("events",  "Browse event stream for a run"),
+            ("quit",    "Exit"),
+        ]
+        menu_args: list[str] = []
+        for key, label in main_menu:
+            menu_args += [key, label]
+        choice = _whiptail_menu(
+            "Mnemosyne experiments",
+            f"{len(runs)} runs available. What do you want to do?",
+            menu_args,
+        )
+        if not choice or choice == "quit":
+            return 0
+
+        if choice == "view":
+            run_id = _pick_run(runs, "Pick a run to inspect:")
+            if run_id:
+                _show_run_in_tui(run_id, args.projects_dir)
+        elif choice == "aggregate":
+            run_id = _pick_run(runs, "Pick a run to aggregate:")
+            if run_id:
+                _aggregate_in_tui(run_id, args.projects_dir)
+        elif choice == "diff":
+            run_a = _pick_run(runs, "Pick the FIRST run (a):")
+            if not run_a:
+                continue
+            run_b = _pick_run(runs, "Pick the SECOND run (b):")
+            if not run_b:
+                continue
+            _diff_in_tui(run_a, run_b, args.projects_dir)
+        elif choice == "pareto":
+            _pareto_in_tui(args.projects_dir)
+        elif choice == "top-k":
+            _topk_in_tui(runs, args.projects_dir)
+        elif choice == "events":
+            run_id = _pick_run(runs, "Pick a run for event stream:")
+            if run_id:
+                _events_in_tui(run_id, args.projects_dir)
+
+
+def _whiptail_menu(title: str, prompt: str, items: list[str]) -> str | None:
+    """items is a flat list [key, label, key, label, ...]."""
+    import subprocess as _subprocess
+    count = len(items) // 2
+    cmd = ["whiptail", "--title", title, "--menu", prompt, "18", "70", str(count)] + items
+    r = _subprocess.run(cmd, capture_output=True, text=True)
+    return r.stderr.strip() if r.returncode == 0 else None
+
+
+def _pick_run(runs: list, prompt: str) -> str | None:
+    items: list[str] = []
+    for rid, meta in runs[:30]:
+        short_id = rid[:48]
+        label = f"{meta.get('status','?'):>9}  {meta.get('model','?'):<18}  {_fmt_short_ts(meta.get('started_utc'))}"
+        items.extend([short_id, label])
+    return _whiptail_menu("Runs", prompt, items)
+
+
+def _show_run_in_tui(run_id: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    try:
+        info = ht.get_run(run_id, projects_dir=projects_dir)
+    except FileNotFoundError:
+        return
+    body = [f"# {run_id}", ""]
+    body.append(f"path: {info['path']}")
+    body.append(f"events: {info['event_count']}")
+    body.append("")
+    body.append("## metadata")
+    for k in sorted(info["metadata"]):
+        body.append(f"  {k}: {info['metadata'][k]}")
+    if info["results"]:
+        body.append("")
+        body.append("## metrics")
+        for k, v in (info["results"].get("metrics") or {}).items():
+            body.append(f"  {k}: {v}")
+    _subprocess.run(["whiptail", "--title", f"Run {run_id[:40]}",
+                     "--scrolltext", "--msgbox", "\n".join(body), "30", "90"])
+
+
+def _aggregate_in_tui(run_id: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io
+    import contextlib
+    ns = argparse.Namespace(run_id=run_id, projects_dir=projects_dir, json=False)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_aggregate(ns)
+    text = buf.getvalue() or "(no events)"
+    _subprocess.run(["whiptail", "--title", f"Aggregate {run_id[:40]}",
+                     "--scrolltext", "--msgbox", text, "30", "100"])
+
+
+def _diff_in_tui(run_a: str, run_b: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io
+    import contextlib
+    ns = argparse.Namespace(run_a=run_a, run_b=run_b,
+                             projects_dir=projects_dir, json=False)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_diff(ns)
+    text = buf.getvalue() or "(diff empty)"
+    _subprocess.run(["whiptail", "--title", "Diff",
+                     "--scrolltext", "--msgbox", text, "35", "100"])
+
+
+def _pareto_in_tui(projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io
+    import contextlib
+    ns = argparse.Namespace(
+        axes="accuracy,latency_ms_avg",
+        directions="max,min",
+        plot=True,
+        projects_dir=projects_dir,
+        json=False,
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_pareto(ns)
+    _subprocess.run(["whiptail", "--title", "Pareto frontier",
+                     "--scrolltext", "--msgbox", buf.getvalue() or "(no runs)", "35", "100"])
+
+
+def _topk_in_tui(runs: list, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    metric = _subprocess.run(
+        ["whiptail", "--title", "top-k metric", "--inputbox",
+         "Metric name (e.g. accuracy, latency_ms_avg):",
+         "10", "60", "accuracy"],
+        capture_output=True, text=True,
+    )
+    if metric.returncode != 0 or not metric.stderr.strip():
+        return
+    direction = _whiptail_menu("top-k direction", "Max or min?",
+                                ["max", "Higher is better", "min", "Lower is better"])
+    if not direction:
+        return
+    import io, contextlib
+    ns = argparse.Namespace(
+        k=10, metric=metric.stderr.strip(), direction=direction,
+        projects_dir=projects_dir, json=False,
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_top_k(ns)
+    _subprocess.run(["whiptail", "--title", "Top-k", "--scrolltext",
+                     "--msgbox", buf.getvalue() or "(no runs)", "25", "90"])
+
+
+def _events_in_tui(run_id: str, projects_dir: str | None) -> None:
+    import subprocess as _subprocess
+    import io, contextlib
+    ns = argparse.Namespace(
+        run_id=run_id, projects_dir=projects_dir,
+        event_type=None, tool=None, status=None,
+        limit=100, json=False,
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_events(ns)
+    _subprocess.run(["whiptail", "--title", f"Events {run_id[:40]}",
+                     "--scrolltext", "--msgbox",
+                     buf.getvalue() or "(no events)", "35", "100"])
+
+
+def _browse_text(args: argparse.Namespace) -> int:
+    """Plain-text fallback for environments without whiptail."""
+    runs = list(ht.list_runs(projects_dir=args.projects_dir))
+    if not runs:
+        print("No runs found.")
+        return 0
+    while True:
+        print()
+        print("=" * 60)
+        print("Mnemosyne experiments — text browse mode")
+        print("=" * 60)
+        for i, (rid, meta) in enumerate(runs[:20], 1):
+            print(f"  {i}) {rid}  [{meta.get('status','?')}]  {meta.get('model','?')}")
+        print()
+        print("Commands: <number> view, d <a> <b> diff, p pareto, q quit")
+        try:
+            cmd = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if not cmd or cmd == "q":
+            return 0
+        if cmd == "p":
+            ns = argparse.Namespace(axes="accuracy,latency_ms_avg",
+                                     directions="max,min", plot=True,
+                                     projects_dir=args.projects_dir, json=False)
+            cmd_pareto(ns)
+            continue
+        parts = cmd.split()
+        if parts[0] == "d" and len(parts) == 3:
+            try:
+                a = int(parts[1]) - 1
+                b = int(parts[2]) - 1
+                ns = argparse.Namespace(run_a=runs[a][0], run_b=runs[b][0],
+                                         projects_dir=args.projects_dir, json=False)
+                cmd_diff(ns)
+            except (ValueError, IndexError):
+                print("usage: d <a_index> <b_index>")
+            continue
+        try:
+            idx = int(cmd) - 1
+            rid = runs[idx][0]
+            ns = argparse.Namespace(run_id=rid, projects_dir=args.projects_dir, json=False)
+            cmd_show(ns)
+        except (ValueError, IndexError):
+            print("invalid command")
+
+
 # ---- arg parsing + dispatch --------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -711,6 +1049,17 @@ def build_parser() -> argparse.ArgumentParser:
                              "(call count, success rate, latency p50/p95/p99)")
     ap.add_argument("run_id")
 
+    cp = sub.add_parser("cost", parents=[common],
+                        help="estimate USD cost from model_call usage tokens")
+    cp.add_argument("run_id", nargs="?",
+                    help="run_id (omit to roll up across all runs)")
+    cp.add_argument("--price-override", help="JSON string: "
+                    "{\"prompt\": 2.5, \"completion\": 10.0} for unknown models")
+
+    # Interactive browser — uses whiptail TUI when available.
+    sub.add_parser("browse", parents=[common],
+                   help="interactive run browser (whiptail TUI, text fallback)")
+
     return p
 
 
@@ -725,6 +1074,8 @@ def main(argv: list[str] | None = None) -> int:
         "diff": cmd_diff,
         "events": cmd_events,
         "aggregate": cmd_aggregate,
+        "cost": cmd_cost,
+        "browse": cmd_browse,
     }
     return handlers[args.cmd](args)
 

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.atxgreene.mnemosyne.plist — macOS launchd agent.
+
+  Install (per-user, no sudo required):
+
+    mkdir -p ~/Library/LaunchAgents
+    cp deploy/com.atxgreene.mnemosyne.plist ~/Library/LaunchAgents/
+    launchctl load  ~/Library/LaunchAgents/com.atxgreene.mnemosyne.plist
+    launchctl start com.atxgreene.mnemosyne
+
+  Tail logs:
+    tail -f ~/Library/Logs/mnemosyne/*.log
+
+  Open the dashboard:
+    open http://127.0.0.1:8484/ui
+
+  Before installing, adjust HOME_DIR / .venv / MNEMOSYNE_PROJECTS_DIR
+  below to match your install.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.atxgreene.mnemosyne</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MNEMOSYNE_PROJECTS_DIR</key>
+        <string>/Users/YOU/projects/mnemosyne</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/YOU/projects/mnemosyne</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOU/projects/mnemosyne/.venv/bin/mnemosyne-serve</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8484</string>
+        <string>--dream-every</string>
+        <string>30m</string>
+        <string>--triage-every</string>
+        <string>10m</string>
+        <string>--propose-every</string>
+        <string>30m</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/YOU/Library/Logs/mnemosyne/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOU/Library/Logs/mnemosyne/stderr.log</string>
+</dict>
+</plist>

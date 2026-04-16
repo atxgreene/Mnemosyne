@@ -4,24 +4,41 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.1.0"
-description = "Meta-Harness-aligned observability + evaluation substrate for local-first LLM agents"
+version = "0.7.0"
+description = "Local-first LLM agent framework: ICMS 3-tier memory, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
 authors = [{ name = "atxgreene" }]
-keywords = ["llm", "agent", "harness", "observability", "mnemosyne", "meta-harness"]
+maintainers = [{ name = "atxgreene" }]
+keywords = [
+    "llm", "agent", "agents", "harness", "observability",
+    "mnemosyne", "meta-harness", "local-first", "ollama",
+    "lmstudio", "claude", "gpt", "fine-tuning", "lora",
+    "icms", "memory", "skills",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Environment :: Web Environment",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
 ]
 # Zero runtime dependencies. Stdlib only, as documented throughout.
 dependencies = []
@@ -29,10 +46,28 @@ dependencies = []
 [project.optional-dependencies]
 # Only for developers working on this repo. No runtime users need these.
 dev = []
+# Training bridge (mnemosyne-train). Only needed when you actually run
+# `mnemosyne-train train`. Export, compress, deploy, eval all work
+# without these.
+train = [
+    "unsloth>=2025.11",
+    "datasets>=3.0",
+    "transformers>=4.45",
+    "trl>=0.12",
+    "peft>=0.13",
+    "accelerate>=1.0",
+]
 
 [project.urls]
-Repository = "https://github.com/atxgreene/sturdy-doodle"
-Architecture = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/ARCHITECTURE.md"
+Homepage      = "https://github.com/atxgreene/sturdy-doodle"
+Repository    = "https://github.com/atxgreene/sturdy-doodle"
+Documentation = "https://github.com/atxgreene/sturdy-doodle/tree/main/docs"
+Issues        = "https://github.com/atxgreene/sturdy-doodle/issues"
+Changelog     = "https://github.com/atxgreene/sturdy-doodle/blob/main/CHANGELOG.md"
+Quickstart    = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/QUICKSTART.md"
+Architecture  = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/ARCHITECTURE.md"
+Roadmap       = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/ROADMAP.md"
+Benchmarks    = "https://github.com/atxgreene/sturdy-doodle/blob/main/docs/BENCHMARKS.md"
 
 # Each entry below creates an executable command on $PATH after `pip install`.
 # The command name on the left stays hyphenated (UX); the module target on the
@@ -44,6 +79,24 @@ environment-snapshot   = "environment_snapshot:main"
 obsidian-search        = "obsidian_search:main"
 notion-search          = "notion_search:main"
 harness-telemetry      = "harness_telemetry:_main_smoke"
+mnemosyne-models       = "mnemosyne_models:_main"
+mnemosyne-memory       = "mnemosyne_memory:_main"
+mnemosyne-triage       = "mnemosyne_triage:_main"
+mnemosyne-proposer     = "mnemosyne_proposer:_main"
+mnemosyne-dreams       = "mnemosyne_dreams:_main"
+mnemosyne-apply        = "mnemosyne_apply:_main"
+mnemosyne-scengen      = "mnemosyne_scengen:_main"
+mnemosyne-goals        = "mnemosyne_goals:_main"
+mnemosyne-mcp          = "mnemosyne_mcp:_main"
+mnemosyne-serve        = "mnemosyne_serve:_main"
+mnemosyne-train        = "mnemosyne_train:_main"
+mnemosyne-batch        = "mnemosyne_batch:_main"
+mnemosyne-datagen      = "mnemosyne_datagen:_main"
+mnemosyne-avatar       = "mnemosyne_avatar:_main"
+mnemosyne-resolver     = "mnemosyne_resolver:_main"
+mnemosyne-adapter-claude-code = "mnemosyne_adapter_claude_code:_main"
+mnemosyne-compactor    = "mnemosyne_compactor:_main"
+mnemosyne-continuity   = "mnemosyne_continuity:_main"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -60,7 +113,72 @@ py-modules = [
     "environment_snapshot",
     "obsidian_search",
     "notion_search",
+    # v1 agent-framework modules (see docs/ARCHITECTURE.md)
+    "mnemosyne_memory",
+    "mnemosyne_models",
+    "mnemosyne_skills",
+    "mnemosyne_brain",
+    "mnemosyne_identity",
+    # v1.1 self-healing feedback loop (CREAO/Peter-Pang-inspired)
+    "mnemosyne_triage",
+    # v1.2 novel architectural primitives — see docs/ROADMAP.md
+    "mnemosyne_proposer",
+    "mnemosyne_dreams",
+    "mnemosyne_inner",
+    # v0.2.0 rigor pass: shippability surface
+    "mnemosyne_serve",
+    "mnemosyne_apply",
+    "mnemosyne_embeddings",
+    "mnemosyne_scengen",
+    "mnemosyne_goals",
+    "mnemosyne_mcp",
+    # v0.2.0 training bridge (Hermes-compatible export; Unsloth training;
+    # LM Studio / Ollama deploy; A/B eval). See docs/TRAINING.md.
+    "mnemosyne_train",
+    # v0.2.3 extended model + skill support (ported from Hermes Agent):
+    #   - tool-call parsers for text-embedded formats (Hermes/Qwen/
+    #     Mistral/Llama-3 tags) that unquantized local models emit
+    #     instead of structured tool_calls fields
+    #   - curated 11-skill library (fs / http / git / sqlite / shell)
+    "mnemosyne_tool_parsers",
+    "mnemosyne_skills_builtin",
+    # v0.2.4: parallel prompt → trajectory runner + synthetic prompt
+    # generator. Together they form the synthetic-data pipeline that
+    # feeds mnemosyne-train.
+    "mnemosyne_batch",
+    "mnemosyne_datagen",
+    # v0.3.0 interactive UI dashboard with evolving avatar.
+    # mnemosyne_ui ships static HTML/CSS/JS via mnemosyne-serve.
+    # mnemosyne_avatar derives state from memory.db + events.jsonl.
+    "mnemosyne_avatar",
+    # v0.3.5 routing-layer audit (Tan "Resolvers" 2026)
+    "mnemosyne_resolver",
+    # v0.5.0 borrows from agentic-stack:
+    #   user-editable permission model + harness adapter pattern
+    "mnemosyne_permissions",
+    "mnemosyne_adapter_claude_code",
+    # v0.6.0 — the self-calibration property of the cognitive-OS
+    # checklist. See docs/VISION.md + docs/COGNITIVE_OS.md.
+    "mnemosyne_predictions",
+    # v0.7.0 — 5-tier ICMS (L4 patterns, L5 identity), ACT-R decay,
+    # Hebbian reinforcement, L3→L4 compaction, Continuity Score.
+    # See docs/BENCHMARKS_v0.7.md.
+    "mnemosyne_compactor",
+    "mnemosyne_continuity",
 ]
 
+# mnemosyne_ui is a real package (has __init__.py) so its static
+# assets can ship as package_data. The flat-layout py-modules above
+# can't carry data files; only packages can.
+[tool.setuptools.packages.find]
+include = ["mnemosyne_ui*"]
+
 [tool.setuptools.package-data]
+mnemosyne_ui = [
+    "static/*.html",
+    "static/*.css",
+    "static/*.js",
+    "static/*.svg",
+    "static/*.ico",
+]
 "*" = ["scenarios.example.jsonl"]
