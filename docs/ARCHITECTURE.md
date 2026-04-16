@@ -91,61 +91,85 @@ Most agent stacks collapse layers 1–3 into a single repo. Mnemosyne separates 
 
 ---
 
-## Memory architecture — ICMS 5-tier + Instinct overlay
+## Memory architecture — ICMS 6-tier with Reflection → Instinct loop
 
-The memory system is the most-iterated subsystem in this repo. As of v0.8 it has five persistent tiers plus a runtime overlay that gives the agent a fast, user-personalized "instinct" path. The whole thing is one SQLite + FTS5 database — `tier`, `kind`, and `strength` columns on a single `memories` table do all the work. No graph DB, no vector store (optional embeddings exist but are not required), no third-party memory backend.
+The memory system is the most-iterated subsystem in this repo. As of v0.9 it has six persistent tiers; the lowest (L0 Instinct) is a fast-path layer populated by an offline distillation pass over the higher tiers (the "Reflection → Instinct" loop). The whole thing is one SQLite + FTS5 database — `tier`, `kind`, and `strength` columns on a single `memories` table do all the work. No graph DB, no vector store (optional embeddings exist but are not required), no third-party memory backend.
 
 ### Canonical tier table
 
-| Constant      | Tier | Name     | Purpose                                                | Decay |
-| :------------ | :--: | :------- | :----------------------------------------------------- | :---- |
-| `L1_HOT`      |  1   | hot      | Working memory; current session context                | fast  |
-| `L2_WARM`     |  2   | warm     | Short-term; default tier for new writes                | medium|
-| `L3_COLD`     |  3   | cold     | Long-term; demoted from L2 by `demote_unused`          | slow  |
-| `L4_PATTERN`  |  4   | pattern  | Recurring clusters promoted by `mnemosyne_compactor`   | slow  |
-| `L5_IDENTITY` |  5   | identity | Human-approved core values; injected every turn        | very slow |
+| Constant       | Tier | Name     | Purpose                                                | Decay |
+| :------------- | :--: | :------- | :----------------------------------------------------- | :---- |
+| `L0_INSTINCT`  |  0   | instinct | **v0.9** — Fast-path automatic reactions; populated by `mnemosyne_instinct.distill()` from L5+lower (the Reflection → Instinct loop). Always checked first. | medium-slow |
+| `L1_HOT`       |  1   | hot      | Working memory; current session context                | fast  |
+| `L2_WARM`      |  2   | warm     | Short-term; default tier for new writes                | medium|
+| `L3_COLD`      |  3   | cold     | Long-term; demoted from L2 by `demote_unused`          | slow  |
+| `L4_PATTERN`   |  4   | pattern  | Recurring clusters promoted by `mnemosyne_compactor`   | slow  |
+| `L5_IDENTITY`  |  5   | identity | Human-approved core values; injected every turn. **v0.9: also documented as the "Reflection" role** — the layer whose distillation feeds L0. | very slow |
 
-These are the **only** tier constants. `mnemosyne_memory.py` exports them at module scope; `KIND_DECAY_MULTIPLIERS` modifies decay rate per content kind (e.g. `core_value` 0.1×, `failure_note` 3.0×). If a doc anywhere refers to "archival" or "meta-memory" tiers, it's wrong — that vocabulary doesn't exist in the code.
+These are the **only** tier constants. `mnemosyne_memory.py` exports them at module scope; `KIND_DECAY_MULTIPLIERS` modifies decay rate per content kind (e.g. `core_value` 0.1×, `failure_note` 3.0×, `user_instinct` 0.4×). If a doc anywhere refers to "archival" or "meta-memory" tiers, it's wrong — that vocabulary doesn't exist in the code.
 
-### Instinct overlay (v0.8)
+### L0 Instinct — the v0.9 promotion
 
-Instinct is **not a sixth tier.** It's a fast-path overlay on L4 that gives the agent learned, user-specific reactions without disturbing the persistent hierarchy. Implementation:
+v0.8 shipped Instinct as an L4 overlay (`kind="user_instinct"` rows living in the Pattern tier). v0.9 promotes it to its own tier so the cognitive flow matches the storage:
 
-- **Storage:** rows live in L4 with `kind="user_instinct"` and `source="instinct"`. They use the same `memories` table; no schema change.
-- **Population:** `mnemosyne_instinct.distill()` runs in dream cycles (or on demand). It scans recent L1/L2/L3 rows whose kinds signal user-pattern intent (`preference`, `fact`, `event`, `tool_result`), groups by topic-token signature, and writes the top-N recurring patterns as user-instinct rows. Each pass replaces the prior batch idempotently.
-- **Consumption:** `Brain._build_instinct_block()` injects user-instinct rows into the system prompt on every turn, parallel to the L5 identity block. Brain checks instinct *before* doing query-relevance retrieval against the rest of the store.
-- **Decay:** user-instinct rows use the `user_instinct` kind multiplier (0.5×) — slower than ops, faster than identity. Stale preferences get demoted; reinforced ones stay.
+- **Storage:** rows live in L0 with `kind="user_instinct"` and `source="instinct"`. Same `memories` table, no schema migration needed (the `tier` column already accepted any int). Old v0.8 rows at tier=4 continue to work via the kind-based Brain query and get cleared on the next `distill()` pass.
+- **Population:** `mnemosyne_instinct.distill()` scans recent rows whose kinds signal user-pattern intent (`preference`, `fact`, `event`, `interest`, `project`), clusters by Jaccard token overlap, and writes the top-N recurring patterns as L0 user-instinct rows. Each pass replaces the prior batch idempotently. The deliberate exclusion of operational kinds (`failure_note`, `tool_result`, `turn`) keeps signal high.
+- **Consumption:** `Brain._build_instinct_block()` injects L0 rows into the system prompt on every turn, parallel to the L5 identity block. Brain checks instinct *before* doing query-relevance retrieval against the rest of the store.
+- **Decay:** `user_instinct` kind multiplier is 0.4× — between identity (0.1×) and pattern (0.5×). Sticky enough to persist across sessions; adapts when user behavior changes. Stale L0 rows demote to L4 Pattern (so the substrate doesn't forget; the next distill pass rebuilds the L0 batch from fresh signals).
 
-This is the closest the architecture gets to "automatic learned behavior shaped by reflection." Reflection isn't a separate tier — it's what L5 + the dream/compactor cycle already do. Distilled output flows down into L4 Pattern (via the compactor) or into the user-instinct rows (via `mnemosyne_instinct`). On the next turn, the Brain reads them as part of its system context. That's the loop.
+### Reflection → Instinct loop, in code
 
-### Diagram
+"Reflection" isn't a single module — it's the combined effect of three offline processes that observe lower tiers and distill abstractions:
+
+1. `mnemosyne_dreams.consolidate()` — TF-IDF clustering of L2/L3 rows into L3 abstractions.
+2. `mnemosyne_compactor.compact_patterns()` — Jaccard clustering of aged L3 rows into L4 patterns.
+3. `mnemosyne_instinct.distill()` — Jaccard clustering of recent user-pattern-bearing rows into L0 instincts.
+
+The third step is the "Reflection → Instinct" transfer the v0.9 model formalizes. L5 Identity (the highest tier; human-approved) plus everything beneath it is the substrate the distiller reflects on; L0 Instinct is the fast-path output the Brain consults first on every turn. Slow deliberate consolidation gradually shapes fast automatic reaction. Procedural memory in cognitive science; user-pattern fast-path in code.
+
+### Diagram (v0.9 — 6 tiers)
 
 ```
-                                                    ┌──────────────────────┐
-                                                    │  Reflection loop      │
-                                                    │  (dreams + compactor) │
-                                                    │                       │
-                                                    │  • cluster L3 → L4    │
-                                                    │  • distill user       │
-                                                    │    patterns → L4      │
-                                                    │    (user_instinct)    │
-                                                    └──────────┬────────────┘
-                                                               │  offline
-                                                               ▼
-   ingest                       ingest                  inject every turn
-     │                            │                        │
-     ▼                            ▼                        ▼
-  ┌──────┐  promote   ┌──────┐  promote   ┌──────┐    ┌────────────┐    ┌──────────┐
-  │  L1  ├───────────►│  L2  ├───────────►│  L3  │    │  L4        │    │  L5      │
-  │  hot │            │ warm │            │ cold │    │  pattern   │    │ identity │
-  │      │◄──demote───│      │◄──demote───│      │    │ +instinct  │    │  (core)  │
-  └───┬──┘            └──────┘            └──────┘    └─────┬──────┘    └────┬─────┘
-      │                                                     │                │
-      └─────────────► query-time retrieval ◄────────────────┘                │
-                                                                             │
-                                       Brain system prompt ◄─────────────────┘
-                                       (every turn, query-independent)
+                                              ┌────────────────────────────┐
+                                              │  Reflection (offline pass) │
+                                              │  dreams + compactor +      │
+                                              │  instinct distiller        │
+                                              │                            │
+                                              │  observes L1..L5,          │
+                                              │  writes L0 user_instinct   │
+                                              └──────────────┬─────────────┘
+                                                             │  offline
+                                                             ▼
+                                                       ┌──────────┐
+   "fast-path, checked first" ─────────────────────────►   L0     │
+                                                       │ instinct │
+                                                       └────┬─────┘
+                                                            │ inject every turn
+                                                            ▼
+                                                   Brain system prompt
+                                                            ▲
+                                                            │
+                                                            │ identity block
+                                                            │
+   ingest                ingest                 ┌──────────┐│┌──────────┐
+     │                     │                    │   L4     │││   L5     │
+     ▼                     ▼                    │ pattern  │││ identity │
+  ┌──────┐  promote  ┌──────┐  promote ┌──────┐ │ (compact │││ (human   │
+  │  L1  ├──────────►│  L2  ├─────────►│  L3  │ │  output) │││ approved)│
+  │  hot │           │ warm │          │ cold │ └────┬─────┘│└────┬─────┘
+  │      │◄─demote───│      │◄─demote──│      │      │      │     │
+  └──┬───┘           └──────┘          └──┬───┘      │      │     │
+     │                                    │          │      │     │
+     └────────► query-time retrieval ◄────┴──────────┘      │     │
+                                                            │     │
+                            (system prompt, every turn) ◄───┘─────┘
 ```
+
+Bottom-up flow (L1 → L5 via dream/compactor): consolidation. Top-down
+flow (L5 → L0 via distiller): the v0.9 Reflection → Instinct loop.
+On every turn the Brain composes its system prompt with the L5
+identity block and the L0 instinct block before any query-time
+retrieval runs.
 
 ### Comparison to human memory models — the honest version
 

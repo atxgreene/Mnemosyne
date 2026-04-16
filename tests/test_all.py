@@ -4709,10 +4709,10 @@ def _():
 
 
 # =============================================================================
-#  v0.8: mnemosyne_instinct (user-pattern distillation overlay on L4)
+#  v0.8 / v0.9: mnemosyne_instinct (user-pattern distillation; v0.9 promoted to L0 tier)
 # =============================================================================
 
-@test("instinct: distill clusters recurring user-pattern signals into L4")
+@test("instinct: distill clusters recurring user-pattern signals into L0 (v0.9)")
 def _():
     pd = _tmp_projects_dir()
     try:
@@ -4731,9 +4731,82 @@ def _():
         assert r["written"] >= 2, r
         rows = instinct_mod.list_instincts(store)
         assert len(rows) == r["written"], rows
+        # v0.9: every distilled row lands in L0_INSTINCT
+        for row in rows:
+            assert row["tier"] == mm.L0_INSTINCT, (
+                f"expected L0_INSTINCT (0), got {row['tier']}")
         # Failure-note kind is excluded from candidate kinds
         contents = " ".join(row["content"] for row in rows)
         assert "failed" not in contents.lower(), contents
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("instinct v0.9: legacy v0.8 L4 user_instinct rows still inject via Brain")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        store = mm.MemoryStore(path=pd / "m.db")
+        # Simulate a row written by v0.8 (tier=4 instead of v0.9 tier=0)
+        store._conn.execute(
+            "INSERT INTO memories(created_utc, updated_utc, source, "
+            "tier, kind, content, strength) "
+            "VALUES('2025-01-01T00:00:00.000000Z',"
+            "'2025-01-01T00:00:00.000000Z','instinct',?,"
+            "'user_instinct','[LEGACY] sample old-tier instinct', 0.8)",
+            (mm.L4_PATTERN,),
+        )
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=False),
+                     chat_fn=fake_chat, memory=store)
+        b.turn("hi")
+        sys_msg = next(m for m in captured["messages"]
+                       if m["role"] == "system")
+        assert "Learned user instincts" in sys_msg["content"]
+        assert "[LEGACY]" in sys_msg["content"]
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.9: L0_INSTINCT is a valid promote target + apply_decay demotes L0 → L4")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        # promote() accepts L0_INSTINCT
+        mid = store.write("seed", kind="user_instinct", tier=mm.L2_WARM)
+        store.promote(mid, to_tier=mm.L0_INSTINCT)
+        assert store.get(mid)["tier"] == mm.L0_INSTINCT
+        # Decay below 0.3 demotes L0 → L4 (not delete; substrate
+        # doesn't forget; distiller rebuilds L0 next pass)
+        store._conn.execute(
+            "UPDATE memories SET strength = 0.05, "
+            "created_utc='2020-01-01T00:00:00.000000Z', "
+            "last_accessed_utc='2020-01-01T00:00:00.000000Z'"
+        )
+        store.apply_decay()
+        assert store.get(mid)["tier"] == mm.L4_PATTERN
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.9: stats() exposes L0_instinct count separately")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        store.write("a", tier=mm.L0_INSTINCT, kind="user_instinct")
+        store.write("b", tier=mm.L4_PATTERN, kind="pattern")
+        s = store.stats()
+        assert s["by_tier"]["L0_instinct"] == 1, s
+        assert s["by_tier"]["L4_pattern"] == 1, s
     finally:
         shutil.rmtree(pd)
 

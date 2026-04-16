@@ -12,9 +12,15 @@ retrieval runs).
 
 Design choices
 --------------
-- **Not a sixth tier.** Instinct rows live in L4 with `kind="user_instinct"`
-  and `source="instinct"`. Same `memories` table, same schema. The "fast
-  path" is a Brain-level read pattern, not a storage layer.
+- **Now its own tier (v0.9).** Instinct rows live in L0 with
+  `kind="user_instinct"` and `source="instinct"`. Same `memories`
+  table, no schema migration needed (the `tier` column already
+  accepted any int). Reading by kind keeps the `_build_instinct_block`
+  Brain code backward-compatible with v0.8 rows that landed in L4 —
+  those continue to inject until the next `distill()` pass replaces
+  them with L0 rows. Demotion rule: stale L0 instincts (strength <
+  0.3) fall back to L4 Pattern; the next distill pass rebuilds the
+  L0 batch from fresh signals.
 - **Idempotent.** Every distill pass first deletes the prior batch of
   user-instinct rows, then writes a fresh batch. Re-running the distiller
   doesn't double-count.
@@ -49,7 +55,7 @@ from typing import Any
 
 from mnemosyne_compactor import _cluster, _signature
 from mnemosyne_memory import (
-    L4_PATTERN,
+    L0_INSTINCT,
     MemoryStore,
     _default_memory_path,
 )
@@ -165,7 +171,7 @@ def distill(
                 content,
                 source="instinct",
                 kind="user_instinct",
-                tier=L4_PATTERN,
+                tier=L0_INSTINCT,
                 metadata=metadata,
             )
             written += 1
@@ -191,7 +197,8 @@ def list_instincts(store: MemoryStore) -> list[dict[str, Any]]:
     """Return all current user-instinct rows ordered by strength desc."""
     with store._lock:  # noqa: SLF001
         rows = store._conn.execute(  # noqa: SLF001
-            "SELECT id, content, strength, created_utc, metadata_json "
+            "SELECT id, tier, content, strength, created_utc, "
+            "metadata_json "
             "FROM memories WHERE kind = 'user_instinct' "
             "ORDER BY strength DESC, created_utc DESC"
         ).fetchall()

@@ -10,7 +10,7 @@
 
 ![architecture](docs/images/architecture-overview.png)
 
-Channels (REST/CLI/Telegram/Slack/Discord/Avatar UI) → Brain (context assembly + identity lock) → Tool Executor + 19-provider Model Backend. ICMS 5-tier memory (L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity), Inner Dialogue (Planner/Critic/Doer/Evaluator), Dream Consolidation, Meta-Harness self-improvement loop. All data lives as plain SQLite + JSONL + Markdown — your knowledge survives without the framework.
+Channels (REST/CLI/Telegram/Slack/Discord/Avatar UI) → Brain (context assembly + identity lock) → Tool Executor + 19-provider Model Backend. ICMS **6-tier memory** (L0 instinct / L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity) with the v0.9 **Reflection → Instinct loop** distilling L5+lower patterns down into L0 fast-path rows. Inner Dialogue (Planner/Critic/Doer/Evaluator), Dream Consolidation, Meta-Harness self-improvement loop. All data lives as plain SQLite + JSONL + Markdown — your knowledge survives without the framework.
 
 ## Live dashboard
 

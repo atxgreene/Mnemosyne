@@ -96,13 +96,20 @@ from typing import Any
 
 
 # Tier constants — match eternal-context's ICMS L1/L2/L3
+L0_INSTINCT = 0     # v0.9: fast-path automatic reactions; populated by
+                    #       mnemosyne_instinct.distill() from L5+lower
+                    #       (the "Reflection -> Instinct" loop). Always
+                    #       checked first; smallest token budget.
 L1_HOT = 1
 L2_WARM = 2
 L3_COLD = 3
 L4_PATTERN = 4      # v0.7: traits, muscle-memory-like behaviors
-L5_IDENTITY = 5     # v0.7: core values, non-negotiables (human-approved)
+L5_IDENTITY = 5     # v0.7: core values, non-negotiables (human-approved).
+                    #       v0.9: also documented as the "Reflection"
+                    #       role — the layer whose distillation feeds L0.
 
 _TIER_NAMES = {
+    L0_INSTINCT: "L0_instinct",
     L1_HOT: "L1_hot",
     L2_WARM: "L2_warm",
     L3_COLD: "L3_cold",
@@ -123,8 +130,11 @@ KIND_DECAY_MULTIPLIERS: dict[str, float] = {
     # knowledge-class — baseline decay
     "fact":           1.0,
     "pattern":        0.5,   # patterns live longer than facts
-    "user_instinct":  0.5,   # v0.8 — user-pattern fast-path; sticky but
-                             # adapts if the user changes behavior
+    "user_instinct":  0.4,   # v0.9 — Instinct (L0) decay between identity
+                             # (0.1) and pattern (0.5). Sticky enough to
+                             # persist; adapts when the user changes
+                             # behavior. Tuned a touch slower than v0.8
+                             # since L0 should feel "primal," not bursty.
     "trait":          0.3,
     "interest":       0.8,
     "dream_abstract": 1.0,
@@ -549,16 +559,23 @@ class MemoryStore:
     def promote(self, memory_id: int, *, to_tier: int) -> None:
         """Move a memory to a different tier.
 
-        v0.7 expanded the tier set from 3 to 5:
+        v0.9 6-tier model:
+          L0 (instinct) is the fast-path automatic-reaction layer,
+              populated only by mnemosyne_instinct.distill() in the
+              Reflection -> Instinct loop. Direct promotion to L0 is
+              allowed for advanced callers but uncommon; normal usage
+              is to let the distiller manage L0 contents.
           L1 (hot), L2 (warm), L3 (cold) are the original hierarchy.
           L4 (pattern) is produced by mnemosyne_compactor — persistent
               traits and muscle-memory behaviors promoted from recurring
               L3 content.
-          L5 (identity) is reserved for human-approved core values. The
-              compactor never writes here directly; only explicit API
-              calls (or the user via the UI) can elevate to L5.
+          L5 (identity / reflection role) is reserved for human-approved
+              core values. The compactor never writes here directly;
+              only explicit API calls (or the user via the UI) can
+              elevate to L5.
         """
-        if to_tier not in (L1_HOT, L2_WARM, L3_COLD, L4_PATTERN, L5_IDENTITY):
+        if to_tier not in (L0_INSTINCT, L1_HOT, L2_WARM, L3_COLD,
+                           L4_PATTERN, L5_IDENTITY):
             raise ValueError(f"invalid tier: {to_tier}")
         now = _utcnow()
         with self._lock:
@@ -640,13 +657,19 @@ class MemoryStore:
                 0.4 * baseline + 0.6 * strength * decay_factor))
             if abs(new_strength - strength) > 0.01:
                 strength_updates.append((new_strength, mid))
-            # Demote below 0.3 from L4 → L3, from L1/L2 → next tier
+            # Demotion rules:
+            #   L0 instinct  -> L4 pattern  (stale instinct falls back
+            #                   to pattern; the distiller will rebuild
+            #                   the L0 batch on its next pass)
+            #   L4 pattern   -> L3 cold
+            #   L1/L2 hot/warm -> next tier (only if effectively dead)
             if new_strength < 0.3:
                 tier = r["tier"]
-                if tier == L4_PATTERN:
+                if tier == L0_INSTINCT:
+                    tier_updates.append((L4_PATTERN, mid))
+                elif tier == L4_PATTERN:
                     tier_updates.append((L3_COLD, mid))
                 elif tier in (L1_HOT, L2_WARM) and new_strength < 0.1:
-                    # Only demote hot/warm to cold if effectively dead
                     tier_updates.append((tier + 1, mid))
 
         with self._lock:
@@ -720,7 +743,8 @@ class MemoryStore:
                 _TIER_NAMES[t]: self._conn.execute(
                     "SELECT COUNT(*) FROM memories WHERE tier = ?", (t,)
                 ).fetchone()[0]
-                for t in (L1_HOT, L2_WARM, L3_COLD, L4_PATTERN, L5_IDENTITY)
+                for t in (L0_INSTINCT, L1_HOT, L2_WARM, L3_COLD,
+                          L4_PATTERN, L5_IDENTITY)
             }
             by_kind = dict(
                 self._conn.execute(
@@ -906,7 +930,7 @@ def _main(argv: list[str] | None = None) -> int:
     wp.add_argument("--source", default="cli")
     wp.add_argument("--kind", default="fact")
     wp.add_argument("--tier", type=int, default=L2_WARM,
-                    choices=[1, 2, 3, 4, 5])
+                    choices=[0, 1, 2, 3, 4, 5])
 
     sp = sub.add_parser("search", help="full-text search")
     sp.add_argument("query")

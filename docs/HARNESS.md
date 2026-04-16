@@ -20,7 +20,7 @@ If a verify command fails, file an issue.
 |---|-----------|:------:|----------------|----------------|
 | 1 | Orchestration loop (TAO / ReAct) | ✓ | `mnemosyne_brain.Brain.turn()` — single-agent loop, max_tool_iterations bounded | `python3 -c "from mnemosyne_brain import Brain, BrainConfig; print(Brain.turn.__doc__)"` |
 | 2 | Tools (registration, schema, dispatch) | ✓ | `mnemosyne_skills.SkillRegistry` + `mnemosyne_skills_builtin` (11 builtin skills: fs/http/git/sqlite/shell) | `mnemosyne-pipeline list-skills` |
-| 3 | Memory (multi-timescale) | ✓ | `mnemosyne_memory.MemoryStore` — 5-tier ICMS (L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity) + Instinct overlay | `mnemosyne-memory stats` |
+| 3 | Memory (multi-timescale) | ✓ | `mnemosyne_memory.MemoryStore` — 6-tier ICMS (L0 instinct / L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity) with Reflection → Instinct loop | `mnemosyne-memory stats` |
 | 4 | Context management | ⚠ partial | System-prompt assembly in `Brain.turn()` orders identity → L5 → instinct → personality → env → goals → memory hits → user. **Missing:** observation masking on long tool-use loops; intra-turn compaction. v0.8.1 target. | n/a — read `mnemosyne_brain.py:340-400` |
 | 5 | Prompt construction | ✓ | `_build_l5_identity_block`, `_build_instinct_block`, `_build_env_snapshot`, `_read_user_docs` (AGENTS.md / TOOLS.md) | inspect via `python3 -c "import mnemosyne_brain as b; help(b.Brain)"` |
 | 6 | Output parsing (native + text-embedded) | ✓ | `mnemosyne_tool_parsers` — 5 parsers (Hermes, Qwen, Mistral, Llama-3, plain-JSON) for unquantized models that emit `<tool_call>` text instead of structured fields | `python3 -m pytest tests/test_all.py -k tool_parser` (see `tests/test_all.py`) |
@@ -66,14 +66,17 @@ harnesses don't have them yet:
   green. This format is unusual: most projects state capabilities;
   we publish a runnable checklist that gates the marketing language
   ("substrate" until all 5 green; "cognitive OS" once they're green).
-- **5-tier ICMS with ACT-R decay + Hebbian reinforcement.** Not a
+- **6-tier ICMS with ACT-R decay + Hebbian reinforcement.** Not a
   vector store, not a graph. SQLite + FTS5 with `tier`, `kind`, and
   `strength` columns; offline ACT-R decay multiplied by per-kind rate
   (identity 0.1×, ops 3.0×). Reinforces on read. Demotes below 0.3.
-- **Instinct overlay (v0.8).** User-pattern signals distilled into L4
-  rows with `kind="user_instinct"`. Brain consults them every turn
-  before query-relevance retrieval — a fast path of learned automatic
-  reactions, populated offline, idempotent across re-runs.
+- **L0 Instinct tier + Reflection → Instinct loop (v0.9).**
+  User-pattern signals distilled from L5+lower into L0 rows with
+  `kind="user_instinct"`. Brain consults them every turn before
+  query-relevance retrieval — a fast path of learned automatic
+  reactions, populated offline, idempotent across re-runs. L5 Identity
+  (human-approved core values) feeds L0 via the distillation pass;
+  slow deliberate reflection gradually shapes fast automatic reaction.
 - **Continuity Score benchmark.** 50 scenarios, six categories,
   10-scenario cross-session subset. Memory-layer-only dryrun: 0.96
   aggregate, 1.0 cross-session (v0.7.1 substrate fix). Reproducible:

@@ -152,7 +152,10 @@ jobs:
           from mnemosyne_continuity import load_scenarios, run_continuity, judge_response
           # v0.8.0 library surfaces
           from mnemosyne_instinct import distill, list_instincts, clear_instincts
-          print('all 27+ library surfaces import cleanly')
+          # v0.9.0 — Instinct promoted to its own L0 tier
+          from mnemosyne_memory import L0_INSTINCT
+          assert L0_INSTINCT == 0, L0_INSTINCT
+          print('all 28+ library surfaces import cleanly (incl. L0_INSTINCT)')
           "
       - name: Verify UI static assets ship with the package
         run: |

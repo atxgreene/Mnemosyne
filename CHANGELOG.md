@@ -2,6 +2,76 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.0] — 2026-04-16 — Instinct promoted to L0 + 6-tier ICMS + Reflection → Instinct loop
+
+Promotes Instinct from a v0.8 L4 overlay to its own dedicated tier
+(L0). The cognitive flow now matches the storage: Instinct sits
+*below* L1 Hot in the tier ordering, is checked first by the Brain
+on every turn, and is populated from L5 Identity (and lower tiers)
+via the offline distillation pass. Slow deliberate reflection
+gradually shapes fast automatic reaction — the loop the Grok / Akshay
+threads have been pointing at, finally first-class in the substrate.
+
+**New tier constant `L0_INSTINCT = 0` (`mnemosyne_memory.py`)**
+- Slots numerically *below* L1, so retrieval ordering is intuitive
+  (lower tier = checked first / fastest). Zero schema migration
+  needed — the `tier` column already accepted any int. Existing
+  v0.8 deployments with `kind="user_instinct"` rows at `tier=4`
+  continue to inject correctly via the Brain's kind-based query and
+  get cleared on the next `distill()` pass (which is idempotent and
+  replaces the prior batch).
+- `_TIER_NAMES`, `promote()`, `apply_decay()`, `stats()`, and the
+  `mnemosyne-memory` CLI all updated to recognize tier 0 as a
+  first-class member of the hierarchy.
+- Decay rule for L0: when a row drops below `strength=0.3`, it
+  demotes to L4 Pattern (not delete; the substrate doesn't forget;
+  the next distill pass rebuilds the L0 batch from fresh signals).
+- `KIND_DECAY_MULTIPLIERS["user_instinct"] = 0.4` (was 0.5 in v0.8)
+  — between identity (0.1) and pattern (0.5), reflecting Instinct's
+  position as identity-derived but more bursty than core values.
+
+**`mnemosyne_instinct.distill()` writes L0 (`mnemosyne_instinct.py`)**
+- `tier=L0_INSTINCT` instead of `tier=L4_PATTERN`. No other behavior
+  change. `clear_instincts()` still nukes-by-kind so it cleans up
+  both new L0 rows and any leftover L4 v0.8 rows on the same pass.
+- `list_instincts()` now returns `tier` as part of each row dict
+  (was: `id, content, strength, created_utc, metadata_json`).
+
+**Brain unchanged — backward-compat verified**
+- `_build_instinct_block()` already filters by `kind='user_instinct'`
+  not by tier, so v0.8 rows at tier=4 keep working alongside v0.9
+  rows at tier=0. New regression test
+  (`instinct v0.9: legacy v0.8 L4 user_instinct rows still inject
+  via Brain`) pins this behavior.
+
+**Docs**
+- `docs/ARCHITECTURE.md` — memory section rewritten for the 6-tier
+  model. Canonical tier table now has six rows (L0-L5). New
+  "Reflection → Instinct loop, in code" section documents which
+  three offline modules (`dreams`, `compactor`, `instinct`)
+  collectively constitute "reflection" and which writes to L0.
+  ASCII diagram updated to show the top-down L5 → L0 distillation
+  flow alongside the bottom-up L1 → L5 consolidation flow.
+- `docs/HARNESS.md` — memory row updated to "6-tier ICMS"; the
+  "Where Mnemosyne is genuinely ahead" section adds the L0 +
+  Reflection-loop bullet.
+- `README.md` — architecture-at-a-glance line updated to call out
+  the 6-tier model and the Reflection → Instinct loop.
+
+**Packaging**
+- `pyproject.toml` 0.8.1 → 0.9.0 (minor bump because the substrate
+  semantics changed: a new tier is a real API addition).
+- CI install-smoke now probes `from mnemosyne_memory import
+  L0_INSTINCT` and asserts the value is 0.
+
+**Tests:** 279 → 282 green. 3 new:
+- instinct: distilled rows land in L0 (v0.9)
+- instinct v0.9: legacy v0.8 L4 user_instinct rows still inject via Brain
+- memory v0.9: L0_INSTINCT promote target + apply_decay demotes L0 → L4
+- memory v0.9: stats() exposes L0_instinct count separately
+
+pyflakes clean.
+
 ## [0.8.1] — 2026-04-16 — launch docs + LM Studio bench wiring
 
 Documentation and marketing batch. Gets the v0.8.0 substrate ready
