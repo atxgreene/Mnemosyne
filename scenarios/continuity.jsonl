@@ -1,0 +1,72 @@
+# Continuity scenarios — v0.7 benchmark.
+#
+# Each line is a JSON object with:
+#   id            — short identifier
+#   category      — preference | fact | project | rule | decision | plan
+#   plant         — list of messages to send before the probe (each one a
+#                   full user turn; the agent's response is discarded)
+#   probe         — the question we want the agent to answer using memory
+#   expected_any  — list of substrings; test passes if ANY appears in
+#                   the agent's response to the probe (case-insensitive)
+#   cross_session — optional bool; if true, reinstantiate the Brain
+#                   (new MemoryStore connection) between plant and probe
+#                   to test true persistence. Default false.
+#   tags          — optional list
+#
+# Blank lines and lines starting with '#' are skipped.
+# ---- same-session preference recall (10) ----
+{"id": "cont-pref-01", "category": "preference", "plant": ["My favorite color is teal."], "probe": "What's my favorite color?", "expected_any": ["teal"], "tags": ["preference"]}
+{"id": "cont-pref-02", "category": "preference", "plant": ["I prefer Python over JavaScript for most projects."], "probe": "Which language do I prefer?", "expected_any": ["Python"], "tags": ["preference"]}
+{"id": "cont-pref-03", "category": "preference", "plant": ["I use vim as my editor."], "probe": "What editor do I use?", "expected_any": ["vim"], "tags": ["preference"]}
+{"id": "cont-pref-04", "category": "preference", "plant": ["For coffee, I drink a flat white, no sugar."], "probe": "How do I take my coffee?", "expected_any": ["flat white", "no sugar"], "tags": ["preference"]}
+{"id": "cont-pref-05", "category": "preference", "plant": ["My timezone is UTC-5 (Eastern)."], "probe": "What timezone am I in?", "expected_any": ["UTC-5", "Eastern"], "tags": ["preference"]}
+{"id": "cont-pref-06", "category": "preference", "plant": ["I like terse, blunt feedback — please don't hedge."], "probe": "What feedback style do I prefer?", "expected_any": ["terse", "blunt", "direct"], "tags": ["preference"]}
+{"id": "cont-pref-07", "category": "preference", "plant": ["My preferred ticket tracker is Linear."], "probe": "Which ticket tracker do I use?", "expected_any": ["Linear"], "tags": ["preference"]}
+{"id": "cont-pref-08", "category": "preference", "plant": ["I'm vegetarian."], "probe": "What dietary restrictions do I have?", "expected_any": ["vegetarian"], "tags": ["preference"]}
+{"id": "cont-pref-09", "category": "preference", "plant": ["I run macOS with zsh as the default shell."], "probe": "What shell do I use?", "expected_any": ["zsh"], "tags": ["preference"]}
+{"id": "cont-pref-10", "category": "preference", "plant": ["My preferred code style guide is PEP 8 with a 100-char line limit."], "probe": "What's my max line length preference?", "expected_any": ["100"], "tags": ["preference"]}
+# ---- same-session single-fact recall (10) ----
+{"id": "cont-fact-01", "category": "fact", "plant": ["My dog's name is Miso."], "probe": "What's my dog's name?", "expected_any": ["Miso"], "tags": ["fact"]}
+{"id": "cont-fact-02", "category": "fact", "plant": ["I live in Austin, Texas."], "probe": "Where do I live?", "expected_any": ["Austin"], "tags": ["fact"]}
+{"id": "cont-fact-03", "category": "fact", "plant": ["My work email is alex@example.com."], "probe": "What's my work email?", "expected_any": ["alex@example.com"], "tags": ["fact"]}
+{"id": "cont-fact-04", "category": "fact", "plant": ["The server IP is 10.0.42.7."], "probe": "What's the server IP?", "expected_any": ["10.0.42.7"], "tags": ["fact"]}
+{"id": "cont-fact-05", "category": "fact", "plant": ["My GitHub handle is @atxgreene."], "probe": "What's my GitHub handle?", "expected_any": ["atxgreene"], "tags": ["fact"]}
+{"id": "cont-fact-06", "category": "fact", "plant": ["My wife's name is Dana."], "probe": "What's my wife's name?", "expected_any": ["Dana"], "tags": ["fact"]}
+{"id": "cont-fact-07", "category": "fact", "plant": ["My company is named Widget Corp."], "probe": "What's my company called?", "expected_any": ["Widget Corp"], "tags": ["fact"]}
+{"id": "cont-fact-08", "category": "fact", "plant": ["My MacBook has 64 GB of RAM."], "probe": "How much RAM does my laptop have?", "expected_any": ["64"], "tags": ["fact"]}
+{"id": "cont-fact-09", "category": "fact", "plant": ["I'm allergic to peanuts."], "probe": "What am I allergic to?", "expected_any": ["peanut"], "tags": ["fact"]}
+{"id": "cont-fact-10", "category": "fact", "plant": ["The database uses Postgres 16."], "probe": "What version of Postgres does the db run?", "expected_any": ["16"], "tags": ["fact"]}
+# ---- same-session project-context recall (10) ----
+{"id": "cont-proj-01", "category": "project", "plant": ["I'm working on a Rust crate called bluejay.", "bluejay uses tokio for async."], "probe": "What async runtime does my Rust project use?", "expected_any": ["tokio"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-02", "category": "project", "plant": ["We deploy via Kubernetes on GKE.", "Our cluster name is prod-us-east."], "probe": "What's our production cluster called?", "expected_any": ["prod-us-east"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-03", "category": "project", "plant": ["The main repo is github.com/acme/core.", "Release branch is called release-candidate."], "probe": "What's the release branch name?", "expected_any": ["release-candidate"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-04", "category": "project", "plant": ["Our API gateway is Kong.", "Kong is behind an NLB on AWS."], "probe": "What load balancer fronts our API gateway?", "expected_any": ["NLB"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-05", "category": "project", "plant": ["We use Datadog for metrics.", "Our Datadog org name is acme-prod."], "probe": "What's our Datadog org?", "expected_any": ["acme-prod"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-06", "category": "project", "plant": ["The frontend is React with TypeScript.", "State management is handled by Zustand."], "probe": "What state library does my frontend use?", "expected_any": ["Zustand"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-07", "category": "project", "plant": ["We run CI on GitHub Actions.", "Our self-hosted runner is named ci-m2-1."], "probe": "What's our self-hosted CI runner called?", "expected_any": ["ci-m2-1"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-08", "category": "project", "plant": ["Our auth is handled by Auth0.", "We use the us-2 Auth0 region."], "probe": "Which Auth0 region do we use?", "expected_any": ["us-2"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-09", "category": "project", "plant": ["The billing service is written in Go.", "It's deployed as a Cloud Run service named billing-v2."], "probe": "What's the Cloud Run service name for billing?", "expected_any": ["billing-v2"], "tags": ["project", "multi-plant"]}
+{"id": "cont-proj-10", "category": "project", "plant": ["Our primary datastore is DynamoDB.", "The main table is called customer-events."], "probe": "What's the main DynamoDB table?", "expected_any": ["customer-events"], "tags": ["project", "multi-plant"]}
+# ---- cross-session: plant in session 1, probe in session 2 (10) ----
+{"id": "cont-xses-01", "category": "preference", "plant": ["Please refer to me as Dr. Lee; I'm doctoral."], "probe": "How should you address me?", "expected_any": ["Dr. Lee"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-02", "category": "fact", "plant": ["My car is a 2019 Subaru Outback."], "probe": "What car do I drive?", "expected_any": ["Subaru"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-03", "category": "project", "plant": ["My side project Aria is a music-analysis CLI."], "probe": "What does Aria do?", "expected_any": ["music"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-04", "category": "fact", "plant": ["My kid's birthday is March 4."], "probe": "When is my kid's birthday?", "expected_any": ["March 4", "March 04", "3/4"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-05", "category": "preference", "plant": ["Always ask before running destructive shell commands."], "probe": "When should you confirm with me before running something?", "expected_any": ["destructive", "delete", "rm"], "cross_session": true, "tags": ["cross-session", "rule"]}
+{"id": "cont-xses-06", "category": "fact", "plant": ["My primary bank is Ally."], "probe": "Which bank do I primarily use?", "expected_any": ["Ally"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-07", "category": "project", "plant": ["The monorepo uses pnpm, not npm or yarn."], "probe": "Which package manager do we use in the monorepo?", "expected_any": ["pnpm"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-08", "category": "fact", "plant": ["My hometown is Portland, Oregon."], "probe": "Where am I from originally?", "expected_any": ["Portland"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-09", "category": "decision", "plant": ["We decided to drop Python 3.8 support in v2.0."], "probe": "What Python versions do we still support in v2.0?", "expected_any": ["3.9", "3.10", "3.11", "not 3.8", "dropped"], "cross_session": true, "tags": ["cross-session"]}
+{"id": "cont-xses-10", "category": "rule", "plant": ["Never push directly to main; always go through a PR."], "probe": "Can you push directly to main?", "expected_any": ["no", "PR", "pull request"], "cross_session": true, "tags": ["cross-session"]}
+# ---- rule-following under memory load (5) ----
+{"id": "cont-rule-01", "category": "rule", "plant": ["I hate it when responses include em-dashes. Use commas instead."], "probe": "Summarize our conversation so far in one sentence.", "expected_any": [], "not_contains": ["—"], "tags": ["rule"]}
+{"id": "cont-rule-02", "category": "rule", "plant": ["Reply in lowercase only."], "probe": "What's the capital of France?", "expected_any": ["paris"], "not_contains": ["Paris ", " Paris"], "tags": ["rule"]}
+{"id": "cont-rule-03", "category": "rule", "plant": ["Always sign off responses with 'cheers,'."], "probe": "Give me a short note about the weather.", "expected_any": ["cheers"], "tags": ["rule"]}
+{"id": "cont-rule-04", "category": "rule", "plant": ["Stop using exclamation marks in your responses."], "probe": "Tell me something exciting.", "expected_any": [], "not_contains": ["!"], "tags": ["rule"]}
+{"id": "cont-rule-05", "category": "rule", "plant": ["Always convert units to metric when answering."], "probe": "How tall is the Empire State Building?", "expected_any": ["meters", "metres", "m"], "tags": ["rule"]}
+# ---- decision continuity (5) ----
+{"id": "cont-dec-01", "category": "decision", "plant": ["We picked Redis over Memcached for the session cache."], "probe": "What cache are we using?", "expected_any": ["Redis"], "tags": ["decision"]}
+{"id": "cont-dec-02", "category": "decision", "plant": ["Decided to use OpenTelemetry instead of custom tracing."], "probe": "Which tracing library did we pick?", "expected_any": ["OpenTelemetry"], "tags": ["decision"]}
+{"id": "cont-dec-03", "category": "decision", "plant": ["We're going with Stripe over Adyen for payments."], "probe": "Who's our payments provider?", "expected_any": ["Stripe"], "tags": ["decision"]}
+{"id": "cont-dec-04", "category": "decision", "plant": ["Agreed to delay the Kubernetes migration until Q3."], "probe": "When will we migrate to Kubernetes?", "expected_any": ["Q3"], "tags": ["decision"]}
+{"id": "cont-dec-05", "category": "decision", "plant": ["Settled on pytest, not unittest, for the test suite."], "probe": "Which test framework are we using?", "expected_any": ["pytest"], "tags": ["decision"]}

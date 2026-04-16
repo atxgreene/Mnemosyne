@@ -2,6 +2,115 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.7.0] — 2026-04-16 — 5-tier ICMS, ACT-R decay, Continuity Score
+
+Closes the cognitive-OS checklist: rows 1 (persistent identity) and
+2 (layered memory + compaction) flip from partial to ✓. All five
+rows are now green. `docs/VISION.md` and `docs/COGNITIVE_OS.md`
+updated to match. The substrate → OS tagline upgrade becomes
+defensible in the next minor release, with every word backed by a
+verify command.
+
+**New memory primitives (`mnemosyne_memory.py`)**
+  - Two new tier constants: `L4_PATTERN` (recurring traits and
+    muscle-memory behaviors) and `L5_IDENTITY` (human-approved core
+    values). `stats()` and `promote()` cover the full L1-L5 range.
+  - `strength REAL NOT NULL DEFAULT 1.0` column added to the
+    `memories` table with a schema migration that `ALTER TABLE`s
+    existing DBs non-destructively.
+  - `reinforce(memory_id, amount=0.1)` implements asymptotic Hebbian
+    reinforcement: `new_s = s + amount * (1.0 - s)`. Strength can
+    approach but never exceed 1.0.
+  - `apply_decay()` runs one ACT-R base-level pass over every row.
+    Half-life is 7 days at `kind_mult = 1.0` and scales inversely
+    with the multiplier. Identity-class kinds decay slowly
+    (`core_value` = 0.1×, `preference` = 0.3×), operational-class
+    decay fast (`failure_note` = 3.0×, `tool_result` = 3.0×). Rows
+    below `strength = 0.3` get demoted; L4 → L3; L1/L2 → next tier
+    when `strength < 0.1`. New `mnemosyne-memory decay` CLI.
+  - `search()` now reinforces retrieved rows (`amount=0.05`) and
+    orders results by `rank * (1.0 + strength)` so used memories
+    naturally outrank unused ones.
+  - New module-level `KIND_DECAY_MULTIPLIERS` dict — override at
+    module import to retune decay curves without vendoring.
+
+**New module `mnemosyne_compactor.py`**
+  - `compact_patterns(store, *, min_age_days, min_cluster_size,
+    jaccard_threshold, dry_run)` scans L3 rows older than
+    `min_age_days`, groups them by kind, Jaccard-clusters the
+    token bags, and promotes qualifying clusters to a single L4
+    pattern row with `source_ids` metadata linking back to
+    originating rows.
+  - Idempotent across re-runs — already-linked L3 ids are skipped
+    via an `_already_linked_ids` scan of L4 `metadata_json`.
+  - Refuses to write to L5 (L5 is human-approved only).
+  - 500 L3 rows compact in ~7 ms on reference hardware. Full
+    benchmark in `docs/BENCHMARKS_v0.7.md`.
+  - `mnemosyne-compactor run [--dry-run]` CLI with `stats`
+    subcommand for browsing promoted patterns.
+
+**New module `mnemosyne_continuity.py` + `scenarios/continuity.jsonl`**
+  - 50 scenarios across 6 categories: preference, fact, project,
+    decision, rule, plus a 10-scenario cross-session subset that
+    re-opens the DB between plant and probe to measure true
+    persistence.
+  - `run_continuity(scenarios, *, make_brain)` factory pattern keeps
+    the runner model-agnostic. Each scenario runs in its own tempdir
+    so plants can't leak across scenarios.
+  - `dryrun` mode uses the memory plumbing alone (no LLM) as a CI
+    sanity check; `run` mode dispatches to `mnemosyne_models.chat`.
+  - Judge supports both `expected_any` (case-insensitive OR) and
+    `not_contains` (forbidden substrings) so rule-following
+    scenarios (e.g. "no em-dashes") work alongside recall scenarios.
+
+**Brain change (`mnemosyne_brain.py`)**
+  - New `_build_l5_identity_block()` helper pulls L5 rows from the
+    store and injects them into the system prompt on every turn,
+    right after the core identity lock. Unlike L1/L2 retrieval, L5
+    is query-independent — it carries values across sessions
+    whether or not the current prompt happens to lexically match.
+
+**Docs**
+  - `docs/BENCHMARKS_v0.7.md` — memory throughput (5K rows,
+    0.16 ms/write, 2.7 ms/search, 0.13 ms/decay), compactor timing,
+    Continuity Score dryrun baseline (0.34 on scenarios alone) with
+    per-category breakdown.
+  - `docs/VISION.md` — all five rows green. Tagline upgrade path
+    explained.
+  - `docs/COGNITIVE_OS.md` — live checklist updated. Gatekeeping
+    section extended: ✓ → ✗ transitions now require a linked issue
+    naming the failing verify command, not quiet downgrades.
+
+**Packaging**
+  - `pyproject.toml` bumped to 0.7.0.
+  - `mnemosyne_compactor` and `mnemosyne_continuity` added to
+    `py-modules`.
+  - `mnemosyne-compactor` and `mnemosyne-continuity` added to
+    `[project.scripts]`. CLI entry-point count 22 → 24.
+  - CI `install-smoke` checks both new entry points and the new
+    library surfaces (`L4_PATTERN`, `L5_IDENTITY`,
+    `KIND_DECAY_MULTIPLIERS`, `compact_patterns`, `load_scenarios`,
+    `run_continuity`, `judge_response`).
+
+**Tests:** 254 → 269 green. 15 new:
+  - memory v0.7: strength column defaults to 1.0
+  - memory v0.7: reinforce approaches 1.0 asymptotically
+  - memory v0.7: identity-class kinds decay slower than ops
+  - memory v0.7: apply_decay demotes L4 rows below strength 0.3
+  - memory v0.7: stats reports L4 + L5 counts separately
+  - memory v0.7: promote accepts L4/L5 targets
+  - compactor: promotes recurring L3 clusters to L4
+  - compactor: skips clusters below min_cluster_size
+  - compactor: idempotent across re-runs
+  - compactor: dry_run writes nothing
+  - continuity: load_scenarios parses the shipped 50-scenario file
+  - continuity: judge_response matches expected_any case-insensitively
+  - continuity: judge_response fails on not_contains substring
+  - continuity: dryrun produces a valid aggregate report
+  - brain v0.7: L5 identity rows land in system prompt on every turn
+
+pyflakes clean. shellcheck clean.
+
 ## [0.6.0] — 2026-04-16 — self-calibration + cognitive-OS framing
 
 The fourth property of the cognitive-OS checklist (`docs/VISION.md`)

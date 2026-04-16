@@ -99,8 +99,73 @@ from typing import Any
 L1_HOT = 1
 L2_WARM = 2
 L3_COLD = 3
+L4_PATTERN = 4      # v0.7: traits, muscle-memory-like behaviors
+L5_IDENTITY = 5     # v0.7: core values, non-negotiables (human-approved)
 
-_TIER_NAMES = {L1_HOT: "L1_hot", L2_WARM: "L2_warm", L3_COLD: "L3_cold"}
+_TIER_NAMES = {
+    L1_HOT: "L1_hot",
+    L2_WARM: "L2_warm",
+    L3_COLD: "L3_cold",
+    L4_PATTERN: "L4_pattern",
+    L5_IDENTITY: "L5_identity",
+}
+
+# Differential decay rates per kind — Ori-inspired (0.1× / 1.0× / 3.0× zones).
+# Identity-class kinds decay slowly (values/preferences should persist);
+# operational-class kinds decay fast (yesterday's tool timeouts aren't
+# useful next week). Unlisted kinds get DEFAULT_DECAY_MULTIPLIER.
+KIND_DECAY_MULTIPLIERS: dict[str, float] = {
+    # identity-class — slowly decaying
+    "identity":       0.1,
+    "identity_value": 0.1,
+    "preference":     0.3,
+    "core_value":     0.1,
+    # knowledge-class — baseline decay
+    "fact":           1.0,
+    "pattern":        0.5,   # patterns live longer than facts
+    "trait":          0.3,
+    "interest":       0.8,
+    "dream_abstract": 1.0,
+    "project":        1.0,
+    # operational-class — fast decay
+    "turn":           2.0,
+    "failure_note":   3.0,
+    "tool_result":    3.0,
+    "event":          2.0,
+}
+DEFAULT_DECAY_MULTIPLIER = 1.0
+
+
+def _actr_base_level(
+    uses: int,
+    time_since_first_use_s: float,
+    d: float = 0.5,
+) -> float:
+    """ACT-R base-level learning equation.
+
+        B = ln(Σ t_i^-d)
+
+    Approximated here with uses distributed uniformly over the
+    available time window — we don't store per-access timestamps,
+    just access_count + last_accessed. This is the "geometric
+    approximation" used in ACT-R practice when full trace isn't
+    stored. Returns a bounded float in ~[0, 5] that reduces the
+    strength of a memory as time passes without access.
+
+    A memory with `uses=10` retrieved over the last hour stays
+    strong; the same memory not touched for 90 days decays toward
+    zero even with the same access count.
+    """
+    import math
+    if uses <= 0 or time_since_first_use_s <= 0:
+        return 0.0
+    # Mean t per use under uniform distribution
+    t_mean = max(1.0, time_since_first_use_s / max(1, uses))
+    # ACT-R base-level: ln(n * t^-d) = ln(n) - d*ln(t)
+    try:
+        return max(0.0, math.log(uses) - d * math.log(t_mean))
+    except (ValueError, ZeroDivisionError):
+        return 0.0
 
 
 try:
@@ -261,7 +326,8 @@ class MemoryStore:
                     content TEXT NOT NULL,
                     metadata_json TEXT,
                     access_count INTEGER NOT NULL DEFAULT 0,
-                    last_accessed_utc TEXT
+                    last_accessed_utc TEXT,
+                    strength REAL NOT NULL DEFAULT 1.0
                 );
                 CREATE INDEX IF NOT EXISTS idx_memories_tier
                     ON memories(tier, last_accessed_utc);
@@ -269,7 +335,16 @@ class MemoryStore:
                     ON memories(kind);
                 CREATE INDEX IF NOT EXISTS idx_memories_source
                     ON memories(source);
+                CREATE INDEX IF NOT EXISTS idx_memories_strength
+                    ON memories(strength);
             """)
+            # Migrate old DBs (pre-v0.7) by adding `strength` if missing.
+            cols = [r[1] for r in self._conn.execute(
+                "PRAGMA table_info(memories)").fetchall()]
+            if "strength" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE memories ADD COLUMN "
+                    "strength REAL NOT NULL DEFAULT 1.0")
             if self._has_fts5:
                 # Contentless FTS5 pointing at memories.content via triggers
                 self._conn.executescript("""
@@ -398,7 +473,13 @@ class MemoryStore:
                 if source:
                     sql += " AND m.source = ?"
                     params.append(source)
-                sql += " ORDER BY memories_fts.rank LIMIT ?"
+                # v0.7: rank multiplied by memory strength so reinforced
+                # memories naturally outrank unused ones. FTS5 rank is
+                # negative (lower = more relevant); multiplying by
+                # (1 + strength) preserves FTS5's ranking within a tier
+                # while boosting stronger rows.
+                sql += (" ORDER BY memories_fts.rank * "
+                        "(1.0 + m.strength) LIMIT ?")
                 params.append(limit)
             else:
                 # Fallback: LIKE scan
@@ -420,15 +501,20 @@ class MemoryStore:
                 params.append(limit)
 
             rows = self._conn.execute(sql, params).fetchall()
-            # Touch access_count + last_accessed_utc for hits
+            # Touch access_count + last_accessed_utc + reinforce strength
+            # (Hebbian: used memories strengthen asymptotically toward 1.0)
             now = _utcnow()
             for row in rows:
                 results.append(dict(row))
+                current_s = float(row["strength"]) if "strength" in row.keys() else 1.0
+                new_s = current_s + 0.05 * (1.0 - current_s)
                 self._conn.execute(
                     """UPDATE memories
-                       SET access_count = access_count + 1, last_accessed_utc = ?
+                       SET access_count = access_count + 1,
+                           last_accessed_utc = ?,
+                           strength = ?
                        WHERE id = ?""",
-                    (now, row["id"]),
+                    (now, new_s, row["id"]),
                 )
         self._emit("memory_read", query=query, hits=len(results),
                    tier_max=tier_max, kind=kind)
@@ -437,8 +523,18 @@ class MemoryStore:
     # ---- tier operations ----------------------------------------------------
 
     def promote(self, memory_id: int, *, to_tier: int) -> None:
-        """Move a memory to a hotter (lower-numbered) tier."""
-        if to_tier not in (L1_HOT, L2_WARM, L3_COLD):
+        """Move a memory to a different tier.
+
+        v0.7 expanded the tier set from 3 to 5:
+          L1 (hot), L2 (warm), L3 (cold) are the original hierarchy.
+          L4 (pattern) is produced by mnemosyne_compactor — persistent
+              traits and muscle-memory behaviors promoted from recurring
+              L3 content.
+          L5 (identity) is reserved for human-approved core values. The
+              compactor never writes here directly; only explicit API
+              calls (or the user via the UI) can elevate to L5.
+        """
+        if to_tier not in (L1_HOT, L2_WARM, L3_COLD, L4_PATTERN, L5_IDENTITY):
             raise ValueError(f"invalid tier: {to_tier}")
         now = _utcnow()
         with self._lock:
@@ -447,6 +543,99 @@ class MemoryStore:
                 (to_tier, now, memory_id),
             )
         self._emit("memory_promote", memory_id=memory_id, to_tier=to_tier)
+
+    # ---- strength + ACT-R decay (v0.7) -------------------------------------
+
+    def reinforce(self, memory_id: int, *, amount: float = 0.1) -> float:
+        """Asymptotic Hebbian-like reinforcement: repeated use pushes
+        strength toward 1.0 but never exceeds it. Returns new strength."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT strength FROM memories WHERE id = ?",
+                (memory_id,),
+            ).fetchone()
+            if row is None:
+                return 0.0
+            s = float(row[0] if isinstance(row, tuple) else row["strength"])
+            new_s = s + amount * (1.0 - s)
+            self._conn.execute(
+                "UPDATE memories SET strength = ?, updated_utc = ? WHERE id = ?",
+                (new_s, _utcnow(), memory_id),
+            )
+        return new_s
+
+    def apply_decay(self, *, now_utc: str | None = None) -> dict[str, int]:
+        """Apply ACT-R-inspired decay to every memory. Decay rate
+        multiplied by KIND_DECAY_MULTIPLIERS[kind]. Returns counts of
+        adjusted / demoted / evicted rows.
+
+        Called by the serve daemon's nightly cron; safe to invoke
+        manually via `mnemosyne-memory decay`.
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        now = _dt.now(_tz.utc) if now_utc is None else _dt.fromisoformat(
+            now_utc.replace("Z", "+00:00"))
+        adjusted = 0
+        demoted = 0
+        evicted = 0
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, tier, kind, strength, access_count, "
+                "created_utc, last_accessed_utc FROM memories"
+            ).fetchall()
+        for r in rows:
+            mid = r["id"]
+            kind = r["kind"] or "fact"
+            strength = float(r["strength"])
+            uses = int(r["access_count"])
+            first_iso = r["created_utc"]
+            last_iso = r["last_accessed_utc"] or first_iso
+            try:
+                first = _dt.fromisoformat(first_iso.replace("Z", "+00:00"))
+                last = _dt.fromisoformat(last_iso.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                continue
+
+            since_last_s = max(1.0, (now - last).total_seconds())
+            since_first_s = max(1.0, (now - first).total_seconds())
+            base = _actr_base_level(max(1, uses), since_first_s)
+            # Compress ACT-R output to [0, 1] and multiply by kind rate
+            baseline = min(1.0, max(0.0, base / 5.0))
+            kind_mult = KIND_DECAY_MULTIPLIERS.get(kind, DEFAULT_DECAY_MULTIPLIER)
+            # Time-since-last weights the decay — use a half-life
+            # tied to kind_mult. 7-day half-life at mult=1.0.
+            half_life_s = max(3600.0, 86400.0 * 7.0 / max(0.05, kind_mult))
+            decay_factor = 0.5 ** (since_last_s / half_life_s)
+            new_strength = max(0.0, min(1.0,
+                0.4 * baseline + 0.6 * strength * decay_factor))
+            if abs(new_strength - strength) > 0.01:
+                with self._lock:
+                    self._conn.execute(
+                        "UPDATE memories SET strength = ? WHERE id = ?",
+                        (new_strength, mid),
+                    )
+                adjusted += 1
+            # Demote below 0.3 from L4 → L3, from L1/L2 → next tier
+            if new_strength < 0.3:
+                tier = r["tier"]
+                if tier == L4_PATTERN:
+                    with self._lock:
+                        self._conn.execute(
+                            "UPDATE memories SET tier = ? WHERE id = ?",
+                            (L3_COLD, mid),
+                        )
+                    demoted += 1
+                elif tier in (L1_HOT, L2_WARM) and new_strength < 0.1:
+                    # Only demote hot/warm to cold if effectively dead
+                    with self._lock:
+                        self._conn.execute(
+                            "UPDATE memories SET tier = ? WHERE id = ?",
+                            (tier + 1, mid),
+                        )
+                    demoted += 1
+        self._emit("memory_decay_pass", adjusted=adjusted,
+                   demoted=demoted, evicted=evicted)
+        return {"adjusted": adjusted, "demoted": demoted, "evicted": evicted}
 
     def evict_l3_older_than(self, *, days: int) -> int:
         """Delete L3 memories last accessed more than N days ago. Returns rows deleted."""
@@ -502,7 +691,7 @@ class MemoryStore:
                 _TIER_NAMES[t]: self._conn.execute(
                     "SELECT COUNT(*) FROM memories WHERE tier = ?", (t,)
                 ).fetchone()[0]
-                for t in (L1_HOT, L2_WARM, L3_COLD)
+                for t in (L1_HOT, L2_WARM, L3_COLD, L4_PATTERN, L5_IDENTITY)
             }
             by_kind = dict(
                 self._conn.execute(
@@ -677,7 +866,8 @@ def _main(argv: list[str] | None = None) -> int:
     wp.add_argument("content")
     wp.add_argument("--source", default="cli")
     wp.add_argument("--kind", default="fact")
-    wp.add_argument("--tier", type=int, default=L2_WARM, choices=[1, 2, 3])
+    wp.add_argument("--tier", type=int, default=L2_WARM,
+                    choices=[1, 2, 3, 4, 5])
 
     sp = sub.add_parser("search", help="full-text search")
     sp.add_argument("query")
@@ -685,6 +875,12 @@ def _main(argv: list[str] | None = None) -> int:
     sp.add_argument("--tier-max", type=int, default=None)
 
     sub.add_parser("stats", help="show memory statistics")
+
+    sub.add_parser(
+        "decay",
+        help="run one ACT-R decay pass over every memory "
+             "(v0.7: strengths updated, rows may be demoted)",
+    )
 
     ep = sub.add_parser("export",
                           help="export memories to a git-backed "
@@ -707,6 +903,8 @@ def _main(argv: list[str] | None = None) -> int:
             print(f"[L{r['tier']}] {r['content']}  ({r['kind']}, {r['source']})")
     elif args.cmd == "stats":
         print(json.dumps(mem.stats(), indent=2, default=str))
+    elif args.cmd == "decay":
+        print(json.dumps(mem.apply_decay(), indent=2, default=str))
     elif args.cmd == "export":
         result = mem.export_to_git(Path(args.to_git).expanduser(),
                                      tier_min=args.tier_min,

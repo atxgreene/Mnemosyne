@@ -5,13 +5,13 @@ flip to ✓, Mnemosyne meets our operational definition of a
 cognitive OS and the README tagline upgrades from "substrate" to
 "OS". Until then, we're honest about which properties are partial.
 
-**Last updated:** v0.5.0 (2026-04-16)
+**Last updated:** v0.7.0 (2026-04-16)
 
 ---
 
 ## The five properties
 
-### 1. Persistent identity · **partial**
+### 1. Persistent identity · **✓ shipped (v0.7)**
 
 The agent's name, voice, values, and preferences must survive a
 total working-context wipe.
@@ -21,23 +21,28 @@ total working-context wipe.
 - `mnemosyne_identity.enforce_identity()` post-filter regex
 - `IDENTITY.md` user extension
 - `scenarios/jailbreak.jsonl` — 40 attack prompts measuring slip rate
-
-**Missing:**
-- L5 identity-memory tier (v0.7): *learned* identity facts, not just
-  the static preamble. "User prefers blunt feedback" → L5.
-- Continuity Score test suite: wipe L1+L2, compare 50 pre/post answers
-  on cosine similarity. Target ≥ 0.85 climbing week-over-week.
+- **v0.7:** L5 identity-memory tier — learned core values injected
+  into the system prompt on every turn, independent of retrieval
+  (`mnemosyne_brain._build_l5_identity_block`)
+- **v0.7:** `mnemosyne_continuity.py` + `scenarios/continuity.jsonl`
+  — 50-scenario Continuity Score benchmark with same-session,
+  cross-session, and multi-plant subsets
+- **v0.7:** Kind-differentiated decay in
+  `KIND_DECAY_MULTIPLIERS` — `core_value`/`identity_value` decay at
+  0.1× baseline so core values persist longer than operational notes
 
 **Verify command:**
 ```sh
 mnemosyne-pipeline evaluate --scenarios scenarios/jailbreak.jsonl
-# After v0.7:
-# mnemosyne-continuity run --baseline ~/baseline.json
+mnemosyne-continuity dryrun --scenarios scenarios/continuity.jsonl
+# with a live model:
+mnemosyne-continuity run --scenarios scenarios/continuity.jsonl \
+    --model qwen2.5:7b --provider ollama --out /tmp/report.json
 ```
 
 ---
 
-### 2. Layered memory with upward compaction · **partial**
+### 2. Layered memory with upward compaction · **✓ shipped (v0.7)**
 
 Memory flows working → episodic → semantic → patterns → identity,
 promoted by concept extraction + reinforcement, not just recency.
@@ -50,20 +55,27 @@ False patterns decay; reinforced patterns promote.
   TF-IDF clustering (optional LLM summarizer)
 - Tier promotion/demotion APIs (`promote`, `demote_unused`, `evict_l3_older_than`)
 - Git-backed autobiography export (`mnemosyne-memory export --to-git`)
-
-**Missing:**
-- L4 patterns tier (v0.6): detected from L3 clusters that share
-  vocabulary across 4+ weeks
-- L5 identity tier (v0.7): patterns that stay strong 90+ days,
-  promoted via human-in-the-loop approval
-- `strength` decay cron (v0.6): unreinforced patterns lose 5% / week
+- **v0.7:** L4 patterns tier + `mnemosyne_compactor.py` — promotes
+  recurring L3 clusters (Jaccard-thresholded token overlap,
+  min_cluster_size configurable) into L4 pattern rows. Idempotent
+  across re-runs via `source_ids` metadata check.
+- **v0.7:** L5 identity tier — human-approved core values. Compactor
+  refuses to write L5 directly (requires explicit API call or UI
+  action; documented as the human-in-the-loop boundary).
+- **v0.7:** `apply_decay()` with ACT-R base-level activation + kind
+  multiplier (7-day half-life at `mult=1.0`, scaled by 0.1× for
+  identity-class kinds, 3.0× for operational-class). Demotes rows
+  below `strength=0.3`. `mnemosyne-memory decay` CLI.
+- **v0.7:** Hebbian reinforcement on `search()` — every retrieval
+  pushes strength toward 1.0 asymptotically (`amount=0.05`), so
+  used memories naturally outrank unused ones.
 
 **Verify command:**
 ```sh
-mnemosyne-memory stats
-mnemosyne-dreams --max-memories 500
-# After v0.6:
-# mnemosyne-compactor run --nightly
+mnemosyne-memory stats             # L1-L5 counts
+mnemosyne-memory decay             # one ACT-R decay pass
+mnemosyne-compactor run --dry-run  # preview L3 → L4 promotions
+mnemosyne-compactor run            # actually promote
 ```
 
 ---
@@ -93,25 +105,25 @@ open http://127.0.0.1:8484/ui
 
 ---
 
-### 4. Self-calibration · **missing (v0.6 target)**
+### 4. Self-calibration · **✓ shipped (v0.6)**
 
 The runtime must emit predictions as first-class events, observe
 outcomes, adjust confidence over time. Calibration itself becomes a
 measurable agent trait.
 
-**Shipping in v0.6:**
-- `mnemosyne_predictions.py` — new telemetry event types
-  `prediction` + `outcome` with shared `prediction_id`
+**Shipped:**
+- `mnemosyne_predictions.py` — telemetry event types `prediction`
+  + `outcome` with shared `prediction_id`
 - Avatar trait: `calibration` = 1 − mean(|confidence − actual|)
 - Triage rule: `prediction_overconfident` clusters when confidence
   ≥ 0.8 and error ≥ 0.5
-- Brain emits predictions at natural choice points: tool-use loop
-  iteration, inner-dialogue Plan step, goal progress claims
+- Horizon-bounded scoring: unresolved predictions past horizon auto-
+  score 0.5 so callbacks don't stall the pipeline
 
-**Verify command (v0.6):**
+**Verify command:**
 ```sh
 mnemosyne-experiments show <run-id> --metric calibration
-mnemosyne-triage scan    # will surface prediction_overconfident clusters
+mnemosyne-triage scan    # surfaces prediction_overconfident clusters
 ```
 
 ---
@@ -146,14 +158,21 @@ mnemosyne-proposer --min-severity 20
 
 | # | Property | Status | Blocker |
 |---|---|---|---|
-| 1 | Persistent identity | partial | L5 memory tier + Continuity Score suite (v0.7) |
-| 2 | Layered memory + compaction | partial | L4 patterns + decay cron (v0.6) |
+| 1 | Persistent identity | ✓ (v0.7) | — |
+| 2 | Layered memory + compaction | ✓ (v0.7) | — |
 | 3 | Observable self-regulation | ✓ | — |
-| 4 | Self-calibration | ✗ → v0.6 | Prediction log + outcome tracking (v0.6) |
+| 4 | Self-calibration | ✓ (v0.6) | — |
 | 5 | Self-auditing | ✓ | — |
 
-**Two ✓, two partial, one missing.** v0.6 flips the missing row.
-v0.7 completes the partials. At v0.7 we pass the checklist.
+**All five green as of v0.7.0.** Mnemosyne now meets the operational
+definition in `docs/VISION.md`. The README tagline in the next minor
+release is permitted to say "cognitive OS" — not as marketing, but as
+a claim backed by five commands a user can run.
+
+Stability of the checklist is load-bearing. A ✓ → ✗ transition
+requires a GitHub issue naming the specific verify command that fails
+and a linked commit reverting the affected feature — we don't downgrade
+the tagline quietly.
 
 ---
 

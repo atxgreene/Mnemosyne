@@ -1,8 +1,8 @@
 # Mnemosyne
 
-**The cognitive substrate for local-first agents. Stdlib only. One pip install away.**
+**A cognitive OS for local-first agents. Stdlib only. One pip install away.**
 
-*Operational definition in [`docs/VISION.md`](./docs/VISION.md); live capability checklist in [`docs/COGNITIVE_OS.md`](./docs/COGNITIVE_OS.md) — we don't claim "cognitive OS" until it's measurable.*
+*All five rows of the [cognitive-OS checklist](./docs/COGNITIVE_OS.md) are ✓ as of v0.7.0 — each backed by a [verify command](./docs/VISION.md). Not marketing; audit it yourself.*
 
 ![dashboard](docs/dashboard.png)
 

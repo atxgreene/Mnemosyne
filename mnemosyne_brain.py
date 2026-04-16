@@ -356,6 +356,15 @@ class Brain:
             if ext:
                 system_parts.append("## User identity extension\n\n" + ext)
 
+        # v0.7 L5 identity memories — human-approved core values.
+        # Injected every turn regardless of user query so they function
+        # as persistent identity, not retrieval-relevant facts. Capped
+        # at 20 rows; token budget is tiny (<500 tokens typical) but
+        # we don't want pathological growth.
+        l5_block = self._build_l5_identity_block()
+        if l5_block:
+            system_parts.append(l5_block)
+
         if self.config.personality:
             system_parts.append(self.config.personality.strip())
 
@@ -792,6 +801,34 @@ class Brain:
             return es.format_markdown(es.build_snapshot())
         except Exception:
             return ""
+
+    def _build_l5_identity_block(self, *, limit: int = 20) -> str:
+        """Pull L5 identity memories as a persistent system-prompt block.
+
+        L5 rows are human-approved core values (the fifth ICMS tier
+        introduced in v0.7). Unlike L1/L2 retrieval which is
+        query-relevance filtered, L5 is injected on every turn so the
+        agent carries its values across sessions. Silent no-op if the
+        store has no L5 rows or the query fails.
+        """
+        try:
+            with self.memory._lock:  # noqa: SLF001
+                rows = self.memory._conn.execute(  # noqa: SLF001
+                    "SELECT content, kind FROM memories "
+                    "WHERE tier = ? "
+                    "ORDER BY strength DESC, last_accessed_utc DESC "
+                    "LIMIT ?",
+                    (mm.L5_IDENTITY, limit),
+                ).fetchall()
+        except Exception:
+            return ""
+        if not rows:
+            return ""
+        lines = [f"- [{r['kind']}] {r['content']}" for r in rows]
+        return (
+            "## Core values (human-approved, persistent across sessions)\n\n"
+            + "\n".join(lines)
+        )
 
     def _read_user_docs(self) -> list[tuple[str, str]]:
         """Read user-editable AGENTS.md and TOOLS.md from the workspace.

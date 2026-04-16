@@ -65,18 +65,20 @@ more.
 
 ## Current status
 
-See `docs/COGNITIVE_OS.md` for the live checklist. As of v0.5.0:
+See `docs/COGNITIVE_OS.md` for the live checklist. As of v0.7.0:
 
 | Property | Status | Verify with |
 |---|---|---|
-| Persistent identity | partial | `mnemosyne-pipeline evaluate --scenarios scenarios/jailbreak.jsonl` + (L5 memory, v0.7) |
-| Layered memory + compaction | partial | L1/L2/L3 shipped (`mnemosyne-memory stats`); L4/L5 in v0.6–0.7 |
+| Persistent identity | ✓ | `mnemosyne-continuity dryrun --scenarios scenarios/continuity.jsonl` + `mnemosyne-pipeline evaluate --scenarios scenarios/jailbreak.jsonl` |
+| Layered memory + compaction | ✓ | `mnemosyne-memory stats` + `mnemosyne-memory decay` + `mnemosyne-compactor run` |
 | Observable self-regulation | ✓ | `mnemosyne-serve` + `/ui` + `mnemosyne-avatar state` |
-| Self-calibration | ✗ → ✓ in v0.6 | `mnemosyne-experiments show <run> --metric calibration` |
+| Self-calibration | ✓ | `mnemosyne-experiments show <run> --metric calibration` |
 | Self-auditing | ✓ | `mnemosyne-resolver check && mnemosyne-triage scan` |
 
-When all five are ✓, Mnemosyne is a cognitive OS by the definition on
-this page. That's a claim we can defend.
+All five are ✓ as of v0.7.0. Mnemosyne meets the operational
+definition on this page. The tagline upgrade from "substrate" to
+"OS" becomes defensible at the next minor release — and the burden
+shifts: from *ship the capability* to *keep it verified*.
 
 ## How this translates to marketing
 
@@ -94,17 +96,18 @@ this page. That's a claim we can defend.
   agent," "mind-like," "true intelligence." If you see those words
   in a pull request, reject it.
 
-## Why "substrate" and not "OS" in the tagline
+## Why "substrate" and not "OS" in the tagline (pre-v0.7)
 
-Because on day one of adopting Mnemosyne you're not running an OS —
-you're pointing a dashboard at a local model. The *ambition* is OS;
-the *shipping product* is substrate. Positioning should match what
-the user actually experiences in the first ten minutes, not what
-the architecture enables on day 100.
+Before v0.7, the first-ten-minutes experience was: point a dashboard
+at a local model. The *ambition* was OS; the *shipping product* was
+substrate. Positioning matched what the user actually experienced on
+day one, not what the architecture enabled on day 100.
 
-When L4 patterns + L5 identity + self-calibration all ship (v0.6–0.7),
-the tagline can honestly become: *"A cognitive OS for local-first
-agents."* Not a day before.
+With v0.7.0 shipping L4 patterns, L5 identity, ACT-R decay, and the
+Continuity Score benchmark, all five checklist rows are green. The
+tagline upgrade from "substrate" → "cognitive OS" is now earned: every
+word backed by a verify command. See `docs/COGNITIVE_OS.md` for the
+live status and gatekeeping rules against quiet downgrades.
 
 ## What happens when we hit all five
 

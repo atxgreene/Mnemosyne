@@ -55,6 +55,8 @@ import mnemosyne_skills_builtin as sbi  # noqa: E402
 import mnemosyne_tool_parsers as tp  # noqa: E402
 import mnemosyne_train as train_mod  # noqa: E402
 import mnemosyne_triage as tri  # noqa: E402
+import mnemosyne_compactor as compactor_mod  # noqa: E402
+import mnemosyne_continuity as continuity_mod  # noqa: E402
 import scenario_runner as sr  # noqa: E402
 
 
@@ -4406,6 +4408,301 @@ def _():
         assert "calibration" in state
         # No predictions yet → null
         assert state["calibration"] is None
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.7: L4/L5 tiers + ACT-R decay + Hebbian reinforcement
+# =============================================================================
+
+@test("memory v0.7: strength column defaults to 1.0 on new writes")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        mid_ = store.write("hello", kind="fact")
+        row = store.get(mid_)
+        assert row is not None
+        assert row["strength"] == 1.0, row
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.7: reinforce() approaches 1.0 asymptotically")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        # Start a row well below 1.0 via direct UPDATE (simulate decay)
+        mid_ = store.write("hello")
+        store._conn.execute(
+            "UPDATE memories SET strength = 0.0 WHERE id = ?", (mid_,))
+        # Reinforce 50x with amount=0.1 should converge into (0.9, 1.0)
+        for _ in range(50):
+            store.reinforce(mid_, amount=0.1)
+        row = store.get(mid_)
+        assert 0.9 < row["strength"] < 1.0, row["strength"]
+        store.close()
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.7: identity-class kinds decay slower than operational kinds")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        core = store.write("core val", kind="core_value",
+                            tier=mm.L5_IDENTITY)
+        fail = store.write("fail note", kind="failure_note",
+                            tier=mm.L2_WARM)
+        # Age both rows 30 days into the past
+        old_iso = "2020-01-01T00:00:00.000000Z"
+        store._conn.execute(
+            "UPDATE memories SET created_utc=?, last_accessed_utc=?",
+            (old_iso, old_iso),
+        )
+        store.apply_decay()
+        s_core = store.get(core)["strength"]
+        s_fail = store.get(fail)["strength"]
+        assert s_core > s_fail, (s_core, s_fail)
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.7: apply_decay demotes L4 pattern rows below strength 0.3")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        p = store.write("pattern", kind="pattern", tier=mm.L4_PATTERN)
+        store._conn.execute(
+            "UPDATE memories SET strength = 0.05, "
+            "created_utc='2020-01-01T00:00:00.000000Z', "
+            "last_accessed_utc='2020-01-01T00:00:00.000000Z'"
+        )
+        store.apply_decay()
+        row = store.get(p)
+        assert row["tier"] == mm.L3_COLD, row
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.7: stats() reports L4 and L5 counts separately")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        store.write("a", tier=mm.L4_PATTERN, kind="pattern")
+        store.write("b", tier=mm.L5_IDENTITY, kind="core_value")
+        s = store.stats()
+        assert s["by_tier"]["L4_pattern"] == 1, s
+        assert s["by_tier"]["L5_identity"] == 1, s
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("memory v0.7: promote accepts L4_PATTERN and L5_IDENTITY targets")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        mid_ = store.write("x", tier=mm.L2_WARM)
+        store.promote(mid_, to_tier=mm.L5_IDENTITY)
+        assert store.get(mid_)["tier"] == mm.L5_IDENTITY
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.7: mnemosyne_compactor (L3 → L4 promotion)
+# =============================================================================
+
+@test("compactor: promotes recurring L3 clusters to L4 pattern rows")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(5):
+            store.write(
+                f"network timeout calling api on attempt {i}",
+                kind="failure_note", tier=mm.L3_COLD,
+            )
+        store._conn.execute(
+            "UPDATE memories SET created_utc = '2020-01-01T00:00:00.000000Z'"
+        )
+        result = compactor_mod.compact_patterns(
+            store, min_age_days=1, min_cluster_size=3,
+        )
+        assert result["promoted"] >= 1, result
+        rows = store._conn.execute(
+            "SELECT * FROM memories WHERE tier = ? AND kind = 'pattern'",
+            (mm.L4_PATTERN,),
+        ).fetchall()
+        assert len(rows) >= 1, rows
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("compactor: skips clusters below min_cluster_size")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(2):
+            store.write(
+                f"isolated event with unique topic quorum {i}",
+                kind="event", tier=mm.L3_COLD,
+            )
+        store._conn.execute(
+            "UPDATE memories SET created_utc = '2020-01-01T00:00:00.000000Z'"
+        )
+        result = compactor_mod.compact_patterns(
+            store, min_age_days=1, min_cluster_size=3,
+        )
+        assert result["promoted"] == 0, result
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("compactor: idempotent across re-runs (does not double-promote)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(
+                f"shared topic cluster recurring thing token {i}",
+                kind="event", tier=mm.L3_COLD,
+            )
+        store._conn.execute(
+            "UPDATE memories SET created_utc = '2020-01-01T00:00:00.000000Z'"
+        )
+        r1 = compactor_mod.compact_patterns(
+            store, min_age_days=1, min_cluster_size=3,
+        )
+        r2 = compactor_mod.compact_patterns(
+            store, min_age_days=1, min_cluster_size=3,
+        )
+        assert r1["promoted"] == 1, r1
+        assert r2["promoted"] == 0, r2  # already-linked ids skipped
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("compactor: dry_run does not write any L4 rows")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        store = mm.MemoryStore(path=pd / "m.db")
+        for i in range(4):
+            store.write(
+                f"shared cluster recurring token {i}",
+                kind="event", tier=mm.L3_COLD,
+            )
+        store._conn.execute(
+            "UPDATE memories SET created_utc = '2020-01-01T00:00:00.000000Z'"
+        )
+        r = compactor_mod.compact_patterns(
+            store, min_age_days=1, min_cluster_size=3, dry_run=True,
+        )
+        assert r["clusters_found"] >= 1, r
+        assert r["promoted"] == 0, r
+        # No L4 rows were written
+        count = store._conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE tier = ?",
+            (mm.L4_PATTERN,),
+        ).fetchone()[0]
+        assert count == 0
+    finally:
+        shutil.rmtree(pd)
+
+
+# =============================================================================
+#  v0.7: mnemosyne_continuity (benchmark runner)
+# =============================================================================
+
+@test("continuity: load_scenarios parses the shipped 50-scenario file")
+def _():
+    scs = continuity_mod.load_scenarios(
+        Path(_REPO) / "scenarios" / "continuity.jsonl"
+    )
+    assert len(scs) == 50, len(scs)
+    # Each has the required fields after defaulting
+    for sc in scs:
+        assert "id" in sc and "probe" in sc
+        assert isinstance(sc["expected_any"], list)
+        assert isinstance(sc["plant"], list)
+
+
+@test("continuity: judge_response matches expected_any case-insensitively")
+def _():
+    ok, _reason = continuity_mod.judge_response(
+        "The answer is TEAL actually.",
+        expected_any=["teal"], not_contains=[],
+    )
+    assert ok
+
+
+@test("continuity: judge_response fails when not_contains substring present")
+def _():
+    ok, reason = continuity_mod.judge_response(
+        "here is a hyphen—",
+        expected_any=[], not_contains=["—"],
+    )
+    assert not ok, reason
+
+
+@test("continuity: dryrun on a minimal scenario file produces an aggregate")
+def _():
+    # Build a throwaway scenario list, no LLM involved
+    report = continuity_mod.run_continuity(
+        [
+            {
+                "id": "t1", "category": "fact",
+                "plant": ["My dog is named Miso."],
+                "probe": "What's my dog's name?",
+                "expected_any": ["miso"],
+                "not_contains": [],
+                "cross_session": False,
+                "tags": [],
+            },
+        ],
+        make_brain=continuity_mod._make_dry_brain,
+    )
+    assert report["total"] == 1, report
+    assert 0.0 <= report["continuity_score"] <= 1.0
+
+
+# =============================================================================
+#  v0.7: Brain L5 identity injection
+# =============================================================================
+
+@test("brain v0.7: L5 identity rows land in system prompt on every turn")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        os.environ["MNEMOSYNE_PROJECTS_DIR"] = str(pd)
+        mem = mm.MemoryStore(path=pd / "m.db")
+        mem.write("I prioritize honesty over politeness.",
+                  kind="core_value", tier=mm.L5_IDENTITY)
+
+        captured: dict[str, Any] = {}
+
+        def fake_chat(messages, **kw):
+            captured["messages"] = messages
+            return {"text": "ok", "tool_calls": [], "status": "ok",
+                    "usage": {}}
+
+        b = br.Brain(config=br.BrainConfig(enforce_identity_lock=True),
+                     chat_fn=fake_chat, memory=mem)
+        b.turn("hello")
+        sys_msg = next(m for m in captured["messages"]
+                       if m["role"] == "system")
+        assert "Core values" in sys_msg["content"], sys_msg["content"][:500]
+        assert "honesty over politeness" in sys_msg["content"]
     finally:
         shutil.rmtree(pd)
 
