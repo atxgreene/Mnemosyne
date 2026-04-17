@@ -123,7 +123,7 @@ conversation samples).
 ## Reporting your numbers
 
 If you run the benchmarks on your hardware, please share the result.
-Open an issue at github.com/atxgreene/sturdy-doodle/issues with:
+Open an issue at github.com/atxgreene/Mnemosyne/issues with:
 
 - The exact command you ran (model id, provider, scenario count).
 - The dataset hash if you ran LOCOMO (printable from `datasets`).

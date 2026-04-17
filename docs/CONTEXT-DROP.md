@@ -1,5 +1,15 @@
 # Mnemosyne — context drop for next Claude Code session
 
+> **Maintainer / agent-session handoff doc — not general user documentation.**
+>
+> This is a session-recovery briefing the maintainer pastes as the
+> first message in a fresh Claude Code session to restore working
+> context when a sandbox is ephemeral. It is checked into the repo
+> so it travels with any git bundle / tarball used as a backup during
+> sandbox transitions. Users looking for install / usage docs should
+> read [`docs/QUICKSTART.md`](./QUICKSTART.md) or the
+> [`README`](../README.md) instead.
+
 Paste this entire file as your first message in a new session to
 restore full working context.
 
@@ -8,7 +18,7 @@ restore full working context.
 ## Who I am / what I'm working on
 
 I'm building **Mnemosyne**, a local-first AI agent framework. GitHub:
-`atxgreene/sturdy-doodle`. Current development branch:
+`atxgreene/Mnemosyne`. Current development branch:
 `claude/setup-mnemosyne-consciousness-NZqQE`.
 
 Mnemosyne is a Python package (`pip install mnemosyne-harness`) that
@@ -256,7 +266,7 @@ graph DB, bandit routing (too complex for stdlib-only).
    through v0.9.0 from this context drop's architecture + key-files
    description. All design decisions captured here.
 4. **If bundle survived + commits lost:**
-   `git clone /tmp/mnemosyne-v0.9.0.bundle fresh && cd fresh && git remote set-url origin https://github.com/atxgreene/sturdy-doodle.git`.
+   `git clone /tmp/mnemosyne-v0.9.0.bundle fresh && cd fresh && git remote set-url origin https://github.com/atxgreene/Mnemosyne.git`.
 5. **Once pushed:** run Continuity Score against LM Studio for
    real numbers. Then publish the Substack article.
 

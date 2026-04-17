@@ -91,6 +91,89 @@ harnesses don't have them yet:
 
 ---
 
+## Deeper read: Rohit Yadav's Claude Code teardown (April 7 2026)
+
+After Akshay's 12-component framing, Rohit Yadav published a much
+deeper reverse-engineering of Claude Code's source (55 directories,
+331 modules). Mapping our position against the specific patterns he
+surfaces:
+
+**Things Claude Code does that Mnemosyne matches:**
+
+- Multi-level memory hierarchy with offline consolidation — our
+  6-tier ICMS + dreams + compactor.
+- Native tool dispatch with schema validation — `mnemosyne_skills`.
+- Sub-agent orchestration for delegated sub-tasks — our inner
+  dialogue (Planner / Critic / Doer / Evaluator personas in one
+  Brain).
+- Hook-shaped extensibility — `mnemosyne_triage` post-hoc clustering
+  + `mnemosyne_proposer` + `mnemosyne_apply` as the self-improvement
+  pipeline; MCP tools via `mnemosyne_mcp`.
+- Permission pipeline — `mnemosyne_permissions`, simpler (our
+  deployments are single-user local; Claude Code runs a 7-stage
+  enterprise pipeline we don't need).
+- Retry with state-machine semantics per error class — partial.
+  `mnemosyne_memory` has 5-attempt exponential backoff on SQLite
+  locks; `mnemosyne_models` has provider-specific retry. Not the
+  823-line state-class-per-error-type architecture Claude Code
+  runs — that's tracked for v0.9 / v0.10 under "error taxonomy."
+
+**Things Claude Code does that Mnemosyne doesn't (yet):**
+
+- **Async-generator agent loop with streaming + cancellation +
+  backpressure.** Our `Brain.turn()` is a synchronous function.
+  Refactoring to a generator-based loop is substantial work;
+  high-leverage for long-running sessions but not blocking the
+  current feature set. Provisional v0.10+ target.
+- **Streaming tool executor** that starts tools mid-stream as soon
+  as each tool-call's input JSON is complete. We wait for the
+  full model response. Meaningful latency win on multi-tool turns;
+  depends on the generator refactor above.
+- **Concurrency classification for tools.** Claude Code marks each
+  tool read-only vs state-mutating and runs read-only ones in
+  parallel batches (up to 10), mutating ones serially. Our tool
+  executor runs serially. Concrete, shippable improvement —
+  candidate for v0.9.2 or v0.10.
+- **Tool result budgeting.** `maxResultSizeChars` per tool; results
+  exceeding the budget persist to disk and return a path + preview.
+  Defends against the "user runs `cat` on a 1 MB log file" failure
+  mode. Easy add; candidate for v0.9.2. Not currently covered by
+  our skill definitions.
+- **Four-strategy context compaction hierarchy** (microcompact /
+  snip / auto summarization / context collapse). Our context
+  management is the identity-lock + tier-based-injection block
+  pattern plus `mnemosyne_dreams` for long-term consolidation.
+  We don't run intra-turn compaction. Useful for long tool-use
+  loops; candidate for v0.10.
+- **System-prompt cache-boundary marker.** Claude Code explicitly
+  splits the prompt into "static above the boundary, volatile
+  below" so the API's prompt cache hits for the static portion
+  across every call. For local-first operation we don't pay the
+  same cache-miss cost the cloud API does; lower priority for us.
+  Documenting the split anyway for readers running Mnemosyne
+  against cloud providers.
+- **CLAUDE.md four-level composable-instruction hierarchy** (enterprise
+  / project / user / local, with `@include` directives). We have
+  `AGENTS.md` + `TOOLS.md` workspace docs, single level, no include.
+  Extending to a Claude-Code-style hierarchy is a medium lift;
+  candidate for v0.10.
+- **Git worktree isolation for parallel sub-agents.** Not applicable
+  unless we add multi-process sub-agent fan-out (we currently
+  don't — inner dialogue runs in one process). Deferred.
+
+**The "layer 4" infrastructure framing.** Rohit makes the case that
+production agent systems have four layers, not three: model weights
+/ context / harness / **infrastructure** (multi-tenancy, RBAC,
+state persistence, distributed coordination). Mnemosyne deliberately
+operates in the single-user, local-first, single-machine quadrant —
+we don't need multi-tenancy or RBAC because there's one user and
+one machine. State persistence and session coordination are already
+covered (SQLite + JSONL + git-backed autobiography). No v0.x-era
+changes needed here; if we ever ship a team-facing deployment mode,
+this is where that work would live.
+
+---
+
 ## How to read this audit
 
 If you've built an agent harness, you can use this table to compare

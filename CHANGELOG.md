@@ -2,6 +2,92 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.1] — 2026-04-17 — repo-rename sweep + doc consistency + Rohit-article triage
+
+No code changes. Pre-launch docs/branding consistency pass triggered by
+a full-repo sanity audit, plus folding Rohit Yadav's Claude Code
+teardown ("How I built harness for my agent using Claude Code leaks",
+April 7 2026) into `docs/HARNESS.md` as a secondary-reference audit.
+
+**Repo rename (sturdy-doodle → Mnemosyne).** The GitHub repo was
+renamed between sessions but many URLs were still pointing at the old
+slug. Fixed:
+- `pyproject.toml` — 9 project URLs (Homepage, Repository, Docs,
+  Issues, Changelog, Quickstart, Architecture, Roadmap, Benchmarks).
+  These render on the PyPI page, so this matters.
+- `pyproject.toml` description — "ICMS 3-tier memory" (last valid at
+  v0.2) → "ICMS 6-tier memory with Reflection → Instinct loop."
+- `pyproject.toml` v0.8 Instinct comment — was still calling it an
+  "L4 overlay"; updated to reflect v0.9's L0 tier.
+- `docs/SECURITY.md` issue-report URL.
+- `docs/WIRING.md` path examples.
+- `docs/LOCAL_MODELS.md`, `docs/ROADMAP.md` clone commands.
+- `docs/articles/v0.8-launch-substack.md` + `.../v0.8-x-thread.md` — 9
+  `sturdy-doodle` URL references rewritten.
+- `install-mnemosyne.sh` comment references.
+- `bench/README.md` issue URL.
+- `docs/ARCHITECTURE.md` layer-1 ASCII box now reads "this repo:
+  Mnemosyne".
+
+**ARCHITECTURE.md tier-count fix.** The four-layer-stack ASCII diagram
+said "ICMS 5-tier memory" while the memory section below said 6-tier.
+Contradiction resolved — diagram now lists all six tiers L0-L5 and
+calls out the Reflection → Instinct loop directly.
+
+**demo-quick.sh portability fix.** Was hardcoded to
+`/home/user/sturdy-doodle/...` paths. Now derives `REPO_ROOT` from
+`${BASH_SOURCE[0]}` so it runs from any clone location.
+
+**BLOG.md relocated.** `BLOG.md` (root, April 9, v0.2-era Twitter
+thread draft) moved to `docs/articles/v0.2-original-blog.md` with a
+header banner noting it's a dated historical artifact. Root dir was
+confusing — three article-y files (BLOG.md, SETUP.md, RELEASE.md)
+plus README.md made it unclear which was canonical. `docs/articles/`
+is now the single home for launch-piece drafts.
+
+**docs/ARTICLE.md banner.** Added a header noting it's the v0.5-era
+essay, superseded by `docs/articles/v0.8-launch-substack.md` for
+current framing. The inline "3-5 tiers" reference updated to point
+at CHANGELOG for the current 6-tier shape.
+
+**SETUP.md banner.** Added a header noting SETUP.md describes the
+pre-v0.2 multi-repo era (where Mnemosyne was a bootstrap that cloned
+`eternal-context` and `fantastic-disco` as separate repos). That
+flow is obsolete since v0.2.0 collapsed everything into one
+pip-installable package. Readers routed to `docs/QUICKSTART.md`.
+
+**docs/CONTEXT-DROP.md banner.** Clarified this is a maintainer-only
+session-handoff doc, not user documentation. It ships in the repo so
+it travels with backup bundles during sandbox transitions.
+
+**docs/HARNESS.md** — new subsection "Deeper read: Rohit Yadav's
+Claude Code teardown" folds the April 7 article's specific patterns
+into our audit. Maps current coverage against Claude Code's own
+architecture (async-generator agent loop, streaming tool executor,
+tool result budgeting, four-strategy compaction hierarchy,
+seven-stage permission pipeline, 823-line retry state machine,
+CLAUDE.md four-level composable-instruction hierarchy, git-worktree
+sub-agent isolation, infrastructure-as-layer-4 framing). Honest
+accounting of what we match, what we don't, and which gaps are
+concrete v0.9.2 / v0.10 candidates:
+- **v0.9.2 candidates (small):** tool result budgeting
+  (`maxResultSizeChars` + persist-to-disk + preview reference);
+  concurrency classification for tools (read-only tools run in
+  parallel batches, mutating tools run serially).
+- **v0.10 candidates (medium):** four-strategy context compaction
+  hierarchy (microcompact / snip / auto / collapse); CLAUDE.md-style
+  four-level AGENTS.md hierarchy with `@include`; error-taxonomy
+  state machine (LangGraph's 4-bucket schema).
+- **Deferred:** async-generator agent loop refactor; git-worktree
+  sub-agent isolation; layer-4 multi-tenancy / RBAC (not needed for
+  our single-user local-first premise).
+
+**pyproject.toml** 0.9.0 → 0.9.1 (docs-only patch bump; no API,
+behavior, or schema changes).
+
+**Tests:** 282/282 green (unchanged). pyflakes clean. No module
+changes.
+
 ## [0.9.0] — 2026-04-16 — Instinct promoted to L0 + 6-tier ICMS + Reflection → Instinct loop
 
 Promotes Instinct from a v0.8 L4 overlay to its own dedicated tier

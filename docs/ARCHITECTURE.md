@@ -25,7 +25,7 @@ The model is the engine. The harness — retrieval, memory, tool dispatch, promp
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  LAYER 1: Harness deployment + observability            │
-│  (this repo: sturdy-doodle)                             │
+│  (this repo: Mnemosyne)                                 │
 │                                                         │
 │  install-mnemosyne.sh     bootstrap, idempotent         │
 │  mnemosyne-wizard.sh      credential config (TUI)       │
@@ -57,10 +57,11 @@ The model is the engine. The harness — retrieval, memory, tool dispatch, promp
 │  LAYER 3: Base harness                                  │
 │  (eternal-context)                                      │
 │                                                         │
-│  ICMS 5-tier memory        L1 hot / L2 warm / L3 cold  │
+│  ICMS 6-tier memory        L0 instinct / L1 hot /       │
+│                            L2 warm / L3 cold /          │
 │                            L4 pattern / L5 identity     │
-│  Instinct overlay          user-pattern fast-path       │
-│                            (L4 kind=user_instinct)      │
+│  Reflection → Instinct     L5 + lower distilled into    │
+│                            L0 (offline, every N turns)  │
 │  SDI selection             context window management    │
 │  11 tools                  search, read, compute, etc.  │
 │  Channel adapters          Telegram/Slack/Discord/REST  │
