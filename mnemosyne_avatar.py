@@ -146,9 +146,17 @@ def _default_projects_dir() -> Path:
 # ---- data sources -------------------------------------------------------
 
 def _read_memory_stats(memory_db: Path) -> dict[str, Any]:
+    """Read per-tier counts for the v0.9 6-tier ICMS.
+
+    Returns counts for L0 (instinct) through L5 (identity). Older
+    callers that only read L1/L2/L3 continue to work — the extra
+    L0/L4/L5 keys are additive, never removing the v0.7 surface.
+    """
+    _empty = {"total": 0, "L0": 0, "L1": 0, "L2": 0, "L3": 0,
+              "L4": 0, "L5": 0,
+              "first_created_utc": None, "learned_skills": 0}
     if not memory_db.exists():
-        return {"total": 0, "L1": 0, "L2": 0, "L3": 0,
-                "first_created_utc": None, "learned_skills": 0}
+        return _empty
     conn = sqlite3.connect(str(memory_db))
     conn.row_factory = sqlite3.Row
     try:
@@ -162,15 +170,17 @@ def _read_memory_stats(memory_db: Path) -> dict[str, Any]:
             "SELECT MIN(created_utc) FROM memories"
         ).fetchone()[0]
     except sqlite3.Error:
-        return {"total": 0, "L1": 0, "L2": 0, "L3": 0,
-                "first_created_utc": None, "learned_skills": 0}
+        return _empty
     finally:
         conn.close()
     return {
         "total": total,
+        "L0": by_tier.get(0, 0),
         "L1": by_tier.get(1, 0),
         "L2": by_tier.get(2, 0),
         "L3": by_tier.get(3, 0),
+        "L4": by_tier.get(4, 0),
+        "L5": by_tier.get(5, 0),
         "first_created_utc": first,
     }
 
@@ -530,9 +540,14 @@ def _compute_state_fresh(
             "%Y-%m-%dT%H:%M:%S.%fZ"),
         "age_days": round(age_days, 3),
         "memory_count": mem["total"],
+        # v0.9: expose all 6 tier counts. L0 + L4 + L5 were missing
+        # in v0.8 compute_state; dashboard never surfaced them.
+        "l0_count": mem["L0"],
         "l1_count": mem["L1"],
         "l2_count": mem["L2"],
         "l3_count": mem["L3"],
+        "l4_count": mem["L4"],
+        "l5_count": mem["L5"],
         "skills_count": skills["total"],
         "learned_skills": skills["learned"],
         "goals_open": goals["open"],

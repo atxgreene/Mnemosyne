@@ -4,6 +4,24 @@ Honest numbers. No cherry-picking. Every table says where it was run,
 what was measured, and how to reproduce. If a row is a reference number
 from *my* hardware, it's labelled as such — your mileage will vary.
 
+## Where to find which numbers
+
+- **Continuity Score** (50 scenarios, 6 categories, v0.7 → v0.9) →
+  [`docs/BENCHMARKS_v0.7.md`](./BENCHMARKS_v0.7.md). Substrate-only
+  dryrun scores 0.96 aggregate / 1.00 cross-session as of v0.7.1.
+  Live-model upper bound: `mnemosyne-continuity run --provider
+  lmstudio|ollama --model <id> --verbose`.
+- **LOCOMO** (snap-research/locomo — 10 long conversations × ~199 QA
+  each, 5 categories) → [`bench/README.md`](../bench/README.md).
+  Runner shipped in v0.9.4 with LM Studio + Mem0 adapters and a
+  substring or OpenAI LLM-as-judge path. Dataset not redistributed;
+  users fetch `data/locomo10.json` from the upstream repo.
+- **Throughput + instrumentation overhead** (below) → v0.2-era
+  reference numbers. Not re-run against the v0.9 substrate;
+  treat as upper-bound order-of-magnitude, not absolute truth.
+
+---
+
 The point of this doc is not to convince you Mnemosyne is fast. It's to
 let you reason about whether the observability wrapper is *free enough*
 for your workload, and to give you a template for running the actual

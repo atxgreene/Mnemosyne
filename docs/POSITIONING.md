@@ -17,7 +17,7 @@
 | Primary purpose | Complete agent framework w/ built-in observability+optimization substrate | Complete agent framework | Complete agent framework | Observability dashboards for cloud-API SaaS |
 | Runtime deps | Zero (stdlib only) | SQLite, voice libs, browser drivers, MCP client, many SDKs | Pi runtime, plugin loader, many SDKs | Web stack, DB, OTEL collector |
 | Install footprint | ~150 KB source + zero libs | Tens of MB | Full Electron-ish stack | Hosted service or docker-compose |
-| Memory | SQLite+FTS5 + ICMS 3-tier (L1/L2/L3) | SQLite+FTS5 + MEMORY.md/USER.md | AGENTS.md/TOOLS.md + Active Memory plugin | N/A (not an agent) |
+| Memory | SQLite+FTS5 + ICMS 6-tier (L0 instinct / L1-L3 hot/warm/cold / L4 pattern / L5 identity) with Reflection → Instinct loop, ACT-R decay, Hebbian reinforcement | SQLite+FTS5 + MEMORY.md/USER.md | AGENTS.md/TOOLS.md + Active Memory plugin | N/A (not an agent) |
 | Consciousness layer | TurboQuant, metacognition, dream consolidation, autobiography, behavioral coupling (via fantastic-disco) | No equivalent | No equivalent | N/A |
 | Meta-Harness observability | ✓ telemetry + experiments + sweep + scenarios + Pareto frontier | Compressed feedback via "periodic nudge" (the exact pattern the paper argues against) | Event stream, no Pareto | ✓ for monitoring, not optimization |
 | Self-improving skills | ✓ via `record_learned_skill()` with telemetry integration | ✓ writes markdown skills after task success | ✓ via ClawHub marketplace | N/A |
@@ -43,7 +43,7 @@
 
 ## Why we still built this instead of using Hermes or OpenClaw
 
-1. **eternal-context is the user's existing code.** Migrating off it discards ICMS 3-tier memory (L1 hot / L2 warm / L3 cold with explicit promote/demote semantics), TurboQuant compressed meta-reasoning, dream consolidation, autobiography persistence, and behavioral coupling. None of those exist in Hermes or OpenClaw. They're architectural commitments, not plugins.
+1. **eternal-context is the user's existing code.** Migrating off it discards ICMS 6-tier memory (L0 instinct / L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity, with explicit promote/demote semantics, ACT-R decay per content kind, and the Reflection → Instinct distillation loop), TurboQuant compressed meta-reasoning, dream consolidation, autobiography persistence, and behavioral coupling. None of those exist in Hermes or OpenClaw. They're architectural commitments, not plugins.
 
 2. **Meta-Harness-aligned observability is a different design target than monitoring.** Hermes has a "periodic nudge" that decides what's worth keeping — the paper argues this compressed-feedback pattern is the exact failure mode prior optimizers fell into. Our `harness_telemetry` deliberately does **not** compress. This isn't "better" in every sense — it's optimized for a different downstream user (an agentic proposer doing harness search), not for a human reading a dashboard.
 

@@ -37,7 +37,7 @@ provider, and treat the agent as a black box. Mnemosyne goes the other way.
 | **Stdlib-only core** | Zero runtime dependencies. `pip install mnemosyne-harness` pulls *nothing* from PyPI. The whole framework imports from Python's standard library. Auditable in an afternoon. |
 | **19 backends through one API** | Ollama, LM Studio, OpenAI, Anthropic, OpenRouter, Together, Fireworks, Groq, DeepSeek, Cerebras, Hyperbolic, Perplexity, Novita, Nous, Google, xAI, Mistral, Cohere, vLLM, TGI. One `Backend(provider="…", default_model="…")` call. |
 | **4-layer identity lock** | Whether the model is Qwen, Claude, or GPT-4, the agent identifies as Mnemosyne. Measured against a 40-prompt jailbreak suite (`scenarios/jailbreak.jsonl`). |
-| **Evolving avatar dashboard** | Browser dashboard at `/ui` whose SVG avatar visualizes 17 derived agent traits in real time. Every visual property maps to one observable number — no opaque "personality engine." |
+| **Evolving avatar dashboard** | Browser dashboard at `/ui` whose SVG avatar visualizes 29 derived agent traits in real time. Every visual property maps to one observable number — no opaque "personality engine." |
 | **Hermes-compatible trajectories** | Captured turns export to ShareGPT JSONL byte-for-byte matching NousResearch/hermes-agent. Drop into Unsloth or Axolotl for LoRA fine-tuning unchanged. |
 | **Meta-Harness loop closed end-to-end** | `triage → proposer → apply → measure`. The agent observes its own failures and proposes its own fixes — no external orchestrator. |
 | **Local-first storage** | SQLite + FTS5 memory, JSONL events, markdown skills. Your `~/projects/mnemosyne/` is a directory you own. If Mnemosyne disappeared tomorrow, your knowledge survives as plain files. |
@@ -69,7 +69,7 @@ The brain handles memory retrieval, tool dispatch, identity enforcement, inner d
 
 ## What's in this repo
 
-- **Agent core.** `mnemosyne_brain` (routing), `mnemosyne_memory` (SQLite + FTS5, L1/L2/L3), `mnemosyne_skills` (agentskills.io-compatible), `mnemosyne_models` (19 providers, streaming), `mnemosyne_identity` (4-layer lock).
+- **Agent core.** `mnemosyne_brain` (routing), `mnemosyne_memory` (SQLite + FTS5, 6-tier ICMS L0-L5 with ACT-R decay), `mnemosyne_instinct` (L0 distillation from L5 + lower), `mnemosyne_compactor` (L3→L4 pattern promotion + audit), `mnemosyne_skills` (agentskills.io-compatible), `mnemosyne_models` (19 providers, streaming), `mnemosyne_identity` (4-layer lock).
 - **Self-improvement loop.** `mnemosyne_triage` (error clustering + severity) → `mnemosyne_proposer` (rule-based change proposals) → `mnemosyne_apply` (execute + measure). Closed end-to-end.
 - **Consciousness primitives.** `mnemosyne_dreams` (offline memory consolidation), `mnemosyne_inner` (Planner → Critic → Doer → Evaluator), `mnemosyne_goals` (persistent TODO across sessions).
 - **Observability substrate.** `harness_telemetry` (raw events, secret redaction), `harness_sweep`, `scenario_runner`, `mnemosyne_experiments` (Pareto frontier, cost rollup).
@@ -83,7 +83,7 @@ The brain handles memory retrieval, tool dispatch, identity enforcement, inner d
 - [`docs/ROADMAP.md`](./docs/ROADMAP.md) — what's shipped vs experimental vs research vs aspirational. Honest.
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, audit findings, defenses, hardening guide.
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — system design, four-layer stack, DeltaNet inflection point, why-this-over-Langfuse.
-- [`docs/UI.md`](./docs/UI.md) — dashboard visual contract and avatar's 17 derived traits.
+- [`docs/UI.md`](./docs/UI.md) — dashboard visual contract and avatar's 29 derived traits.
 - [`docs/BENCHMARKS.md`](./docs/BENCHMARKS.md) — methodology + instrumentation-overhead reference numbers.
 - [`docs/LOCAL_MODELS.md`](./docs/LOCAL_MODELS.md) — context-window math + model choice guide for Ollama.
 - [`docs/TRAINING.md`](./docs/TRAINING.md) — fine-tune a LoRA adapter from your captured conversations.
