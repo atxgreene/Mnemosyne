@@ -2,6 +2,78 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.4] — 2026-04-17 — 6-tier avatar state + doc-currency sweep + correct LOCOMO runner
+
+Two things ship in this release: a real substrate fix (avatar
+state was still only surfacing L1/L2/L3 counts — v0.9's L0/L4/L5
+tiers were invisible to the dashboard) and a doc-currency sweep
+triggered by a third-party audit.
+
+**Substrate — `mnemosyne_avatar._read_memory_stats()` + `compute_state()`**
+The avatar's memory-stats reader was a v0.7-era artifact that only
+counted L1/L2/L3 rows. As of v0.9 the ICMS has six tiers (L0-L5);
+the dashboard never showed populations of Instinct, Pattern, or
+Identity memories. Fixed: the reader now returns counts for all six
+tiers, and `compute_state()` exposes `l0_count`, `l4_count`,
+`l5_count` alongside the existing `l1_count`/`l2_count`/`l3_count`.
+Trait surface went from 26 → 29. Backward-compatible: the old
+L1/L2/L3 keys never disappear.
+
+**`bench/locomo.py` — correct against snap-research/locomo**
+The runner had the wrong dataset path (Hugging Face `load_dataset`,
+which doesn't exist) and wrong schema assumptions (flat
+`turns` + `questions`, but LOCOMO actually keys sessions by
+`session_<N>` and attaches a `qa` list with
+`{question, answer, evidence, category}` per pair). Rewrote:
+- `load_locomo()` reads from `bench/data/locomo10.json`; users
+  download the data themselves (no license upstream — no
+  redistribution).
+- `iter_conversation_turns()` flattens session blocks in
+  chronological order, preserving `dia_id` + per-session timestamps.
+- Added `--max-samples` + `--max-questions-per-sample` flags for
+  smoke tests before committing to a multi-hour full run.
+- Judge: `substring` (free, substring/token overlap) or `openai`
+  (paid, GPT-4o-mini at T=0; matches LOCOMO paper methodology).
+- Category 1-5 integers mapped to `single_hop` / `multi_hop` /
+  `temporal` / `open_domain` / `adversarial` per the paper.
+- `--verbose` streams per-question `✓`/`✗` results during long
+  live-model runs.
+
+**Doc-currency sweep** (triggered by third-party audit):
+- `docs/POSITIONING.md` — competitor-comparison table claimed
+  "ICMS 3-tier" (L1/L2/L3). Fixed to "6-tier (L0 instinct / L1-L3
+  hot/warm/cold / L4 pattern / L5 identity) with Reflection →
+  Instinct loop, ACT-R decay, Hebbian reinforcement." The text body
+  same fix.
+- `docs/VISION.md` — "22 console scripts" in the marketing-guidance
+  section → "25" to match pyproject.
+- `README.md` — avatar visualizes "17 derived agent traits" → "29"
+  (the 6-tier expansion surfaced 3 new counts). Also "What's in
+  this repo" list called out `mnemosyne_memory` as "SQLite + FTS5,
+  L1/L2/L3" — updated to "6-tier ICMS L0-L5 with ACT-R decay" and
+  added `mnemosyne_instinct` + `mnemosyne_compactor` to the core.
+- `docs/articles/v0.8-x-thread.md` — tweet #6 said "17 traits"
+  → "29 traits".
+- `docs/HARNESS.md` — three "v0.8.1 target" / "v0.9 target"
+  footnotes in the component table were stale (those items didn't
+  ship in v0.9) → all updated to "v0.10 target". Tool-result
+  budgeting explicitly called out as v0.9.2-shipped inside the
+  Context Management row (it's cross-cutting; not a core-component
+  row by itself).
+- `docs/BENCHMARKS.md` — added a "Where to find which numbers"
+  forward-pointer at the top of the file pointing at
+  `docs/BENCHMARKS_v0.7.md` (Continuity) and `bench/README.md`
+  (LOCOMO). Legacy v0.2-era throughput tables below still stand
+  as reference.
+
+Note: this is a docs/visibility release — no user-facing API
+changed. `pip install mnemosyne-harness==0.9.4` upgrades the
+dashboard's trait count (dashboard must be restarted to pick up
+the new `compute_state()` keys) and the LOCOMO runner's
+correctness, but existing code targeting v0.9.3 keeps running.
+
+**Tests:** 291/291 green (unchanged). pyflakes clean.
+
 ## [0.9.3] — 2026-04-17 — 8-bit pixel owl avatar + continuity runner verbose mode
 
 Pre-benchmark polish pass. Two user-facing improvements:

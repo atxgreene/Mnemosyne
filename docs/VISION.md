@@ -84,7 +84,7 @@ shifts: from *ship the capability* to *keep it verified*.
 
 - **Technical pages** (README quickstart, API docs, CHANGELOG) lead
   with concrete capabilities: "local-first LLM agent framework,
-  stdlib only, 22 console scripts, 4-layer identity lock." These
+  stdlib only, 25 console scripts, 4-layer identity lock." These
   stay grounded.
 - **Positioning / vision pages** (this doc, `docs/ARTICLE.md`) use
   "cognitive OS" as the organizing frame with the definition above
