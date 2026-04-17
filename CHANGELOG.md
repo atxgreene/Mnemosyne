@@ -2,6 +2,68 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.6] — 2026-04-17 — rule-intent detection + STRICT RULES block
+
+Closes the one v0.9.5 Continuity Score failure (`cont-rule-04` —
+model used "!" despite a "stop using exclamation marks" rule) with
+a small, architecturally-aligned fix. No new class, no parallel
+storage, no tier-count mistakes — just two additions to `Brain`:
+
+**1. Rule-intent detection at write time (`mnemosyne_brain._looks_like_rule`)**
+Conservative regex that matches imperative behavioral-constraint
+openers at the start of a user message: `stop using|saying|writing`,
+`never`, `don't`, `do not`, `always`, `every time`, `from now on`,
+`whenever`, `only use|respond|answer|write`, `reply in|with|using`.
+Deliberately tight — false positives permanently pollute every
+future system prompt, so we'd rather miss a rule than promote a
+casual sentence. When `Brain.turn()` receives a matching user
+message, it writes an extra `kind="rule"` memory alongside the
+usual `kind="turn"` row. Normal retrieval still surfaces the
+conversation; the rule row feeds the strict block below.
+
+**2. `Brain._build_rules_block()` injects a STRICT RULES preamble**
+Queries `kind='rule'` rows (most-recently-accessed first, then by
+strength) and renders them with imperative framing:
+
+```
+## STRICT RULES — you MUST obey every item below on every
+response. Violating a rule makes the response invalid.
+
+- Stop using exclamation marks.
+- Never push directly to main.
+```
+
+Injected AFTER the v0.7 L5 identity block but BEFORE the v0.8 L0
+instinct block — deliberate ordering: identity says what the agent
+IS, rules say what it MUST or MUST NOT do, instinct says what it
+tends to do. Rules override habits; they don't override identity.
+
+**Why this and not Grok's proposed `InstinctStore` class?**
+
+Third-party feedback suggested adding a parallel `InstinctStore`
+with an in-memory `_forbidden_cache` and explicit `add_negative_rule()`
+API. Reviewed and declined — would have:
+- introduced a duplicate module (we already have `mnemosyne_instinct.py`),
+- used `tier=1` (our L1 is Hot, not Instinct — which is L0),
+- broken the one-SQLite-table invariant the substrate is built on,
+- conflated negative rules (imperative user intent) with user
+  instincts (distilled statistical signal).
+
+The fix that shipped integrates with the existing 6-tier ICMS,
+uses the existing `kind` column (zero schema change), and is ~40
+lines of new code. Full review in the relevant commit message.
+
+**Tests:** 291 → 296 green. 5 new:
+- `_looks_like_rule` detects imperative openers + negatives stay false
+- rule-intent user message writes a `kind='rule'` memory (non-rules don't)
+- `_build_rules_block` renders STRICT RULES in system prompt
+- no rules → no block (silent no-op)
+- rules block ordered BEFORE instinct block (rules > habits)
+
+Packaging: `pyproject.toml` 0.9.5 → 0.9.6. Backward-compatible; no
+existing behavior changes unless the user types a rule-phrased
+message.
+
 ## [0.9.5] — 2026-04-17 — first published live-model Continuity Score: Gemma 4 E4B hits 0.98
 
 First reproducible live-model benchmark number lands in the repo.
