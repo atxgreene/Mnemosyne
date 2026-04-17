@@ -2,6 +2,70 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.5] — 2026-04-17 — first published live-model Continuity Score: Gemma 4 E4B hits 0.98
+
+First reproducible live-model benchmark number lands in the repo.
+Gemma 4 E4B Q4_K_M (6.33 GB GGUF) via LM Studio through Mnemosyne's
+6-tier ICMS scores **0.98 aggregate, 1.00 cross-session, 1.00 on
+four of six categories** on the 50-scenario Continuity Score suite.
+
+Full per-scenario report committed at
+`docs/benchmark-results/2026-04-17-continuity-gemma4-e4b.json`
+(summary + metadata; runnable by anyone with LM Studio).
+
+**The result:**
+
+| Category      | Total | Passed | Score     |
+| :------------ | ----: | -----: | :-------- |
+| preference    |    12 |     12 | 1.000     |
+| fact          |    14 |     14 | 1.000     |
+| project       |    12 |     12 | 1.000     |
+| decision      |     6 |      6 | 1.000     |
+| rule          |     6 |      5 | 0.833     |
+| **aggregate** |    50 |     49 | **0.980** |
+
+Cross-session subset: **10 / 10 = 1.000**.
+
+**What matters beyond the aggregate:**
+
+- `cont-proj-04` (two-plant bridging — "Kong is behind an NLB")
+  **passes**. The substrate-only dryrun could not compose across
+  rows; with a live model, Mnemosyne + Gemma correctly recovers
+  "AWS Network Load Balancer (NLB)".
+- `cont-xses-01` (cross-session paraphrase — "refer to me as Dr.
+  Lee" → "How should you address me?") **passes**. Zero lexical
+  overlap between plant and probe; v0.7.1's AND→OR recall fallback
+  + recency fallback surfaced the row; model parsed it cleanly.
+- Only failure is `cont-rule-04`: genuine instruction-following
+  miss by the model (Gemma used exclamation marks despite the
+  planted "stop using exclamation marks" rule). Not a substrate
+  artifact — the rule reached the model via the L5 identity block;
+  the model didn't obey it.
+
+**Docs updated with the real number:**
+- `docs/BENCHMARKS_v0.7.md` — new "Live model" subsection under §3
+  with the table, setup details, reproduce command, honest caveats
+  (single-run, substring judge, not LOCOMO), and a dryrun-vs-live
+  comparison table.
+- `docs/articles/v0.8-launch-substack.md` — replaced the "numbers
+  are yours to measure" hedge with the real 0.98 result, plus a
+  highlighted callout of the two scenarios (NLB, Dr. Lee) that
+  demonstrate live-model composition beyond what the substrate
+  alone can deliver.
+- `docs/articles/v0.8-x-thread.md` — tweet #10 rewritten to lead
+  with the live-model number. Tweet #3 trimmed to stay under 280
+  chars after the update. Full thread re-verified: all 12 tweets
+  under the Twitter limit.
+
+**New directory** `docs/benchmark-results/` for dated benchmark
+reports. Committed to the repo so community reproductions have a
+canonical place to PR into.
+
+**Packaging:** `pyproject.toml` 0.9.4 → 0.9.5. No code changes —
+docs-only patch release.
+
+**Tests:** 291/291 green (unchanged). pyflakes clean.
+
 ## [0.9.4] — 2026-04-17 — 6-tier avatar state + doc-currency sweep + correct LOCOMO runner
 
 Two things ship in this release: a real substrate fix (avatar
