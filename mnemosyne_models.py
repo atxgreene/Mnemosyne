@@ -134,7 +134,34 @@ class Backend:
 
     @property
     def endpoint(self) -> str:
-        return self.url or PROVIDERS[self.provider]
+        """Resolve the provider's endpoint URL.
+
+        Precedence (first non-empty wins):
+          1. `Backend(url=...)` explicit override.
+          2. `MNEMOSYNE_<PROVIDER>_URL` env var — e.g.
+             `MNEMOSYNE_LMSTUDIO_URL=http://100.74.126.118:4321/v1/chat/completions`
+             lets you point LM Studio (or any provider) at a
+             non-default host without editing the source.
+          3. Standard SDK conventions: `OPENAI_BASE_URL` applies to
+             the `openai` provider (with `/chat/completions` appended
+             if the value looks like a bare `/v1` base).
+          4. Hardcoded default from PROVIDERS dict.
+        """
+        if self.url:
+            return self.url
+        import os as _os
+        env_key = f"MNEMOSYNE_{self.provider.upper()}_URL"
+        override = _os.environ.get(env_key, "").strip()
+        if override:
+            return override
+        if self.provider == "openai":
+            base = _os.environ.get("OPENAI_BASE_URL", "").strip()
+            if base:
+                base = base.rstrip("/")
+                if base.endswith("/chat/completions"):
+                    return base
+                return f"{base}/chat/completions"
+        return PROVIDERS[self.provider]
 
     def resolve_api_key(self) -> str | None:
         if self.api_key:
