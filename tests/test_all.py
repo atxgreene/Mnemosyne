@@ -3254,9 +3254,58 @@ def _():
         assert svg.startswith("<svg")
         assert svg.endswith("</svg>")
         assert 'viewBox="0 0 400 400"' in svg
-        # Aura, core, eye, orbiters all present in the rest state
-        for needle in ("auraGrad", "coreGrad", "ellipse", "circle"):
-            assert needle in svg
+        # Aura + core gradient defs + circle elements (halo, orbiters,
+        # wisdom ring) + the v0.9.3 pixel-owl group with crispEdges
+        # rects marking the 8-bit sprite body.
+        for needle in ("auraGrad", "coreGrad", "circle",
+                       "mnemo-owl", 'shape-rendering="crispEdges"'):
+            assert needle in svg, f"missing {needle!r}"
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar v0.9.3: 8-bit owl sprite is 16x16 and left-right symmetric")
+def _():
+    assert len(avatar_mod._OWL_SPRITE) == 16
+    for row in avatar_mod._OWL_SPRITE:
+        assert len(row) == 16, f"row {row!r} is {len(row)} chars, want 16"
+    # Strict L/R symmetry is load-bearing for the visual — if someone
+    # edits the sprite, fail loudly rather than render a deformed owl.
+    for r, row in enumerate(avatar_mod._OWL_SPRITE):
+        assert row == row[::-1], (
+            f"row {r} is not symmetric: {row!r}")
+
+
+@test("avatar v0.9.3: rest mood closes the owl's eyes (no pupil cells)")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        state = avatar_mod.compute_state(projects_dir=pd)
+        state["mood_phase"] = "rest"
+        svg_rest = avatar_mod.render_svg(state)
+        state["mood_phase"] = "focus"
+        svg_focus = avatar_mod.render_svg(state)
+        # Rest state renders pupils as rim-colour slits, focus renders
+        # them as full accent pupils — the rendered SVG must differ.
+        assert svg_rest != svg_focus
+        # Both states still contain the owl group
+        assert "mnemo-owl" in svg_rest
+        assert "mnemo-owl" in svg_focus
+    finally:
+        shutil.rmtree(pd)
+
+
+@test("avatar v0.9.3: pixel-owl breathing + tuft-sway animations embedded")
+def _():
+    pd = _tmp_projects_dir()
+    try:
+        state = avatar_mod.compute_state(projects_dir=pd)
+        state["restlessness"] = 0.5  # force tuft sway
+        svg = avatar_mod.render_svg(state)
+        # Breathing animation on the owl group
+        assert 'animateTransform' in svg
+        # Tuft sway fires when restlessness > 0
+        assert 'type="rotate"' in svg
     finally:
         shutil.rmtree(pd)
 

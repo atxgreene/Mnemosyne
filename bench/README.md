@@ -22,15 +22,40 @@ Mnemosyne. No `bench/requirements.txt` needed.
 # 1. Start LM Studio's local server. Confirm it's reachable:
 curl -s http://localhost:1234/v1/models | head -20
 
-# 2. Run the Continuity Score benchmark against it:
+# 2. Sanity-first: run 5 scenarios to make sure LM Studio is
+#    responding correctly before committing to all 50. Expect ~30 s.
 mnemosyne-continuity run \
     --scenarios scenarios/continuity.jsonl \
     --provider lmstudio \
     --model <model-id-from-step-1> \
+    --max-scenarios 5 \
+    --verbose
+
+# 3. Full benchmark with streaming progress. Expect roughly
+#    N_scenarios × (model's turn latency × 2) — 50 scenarios × ~5 s
+#    per turn × 2 turns per scenario ≈ 8-10 minutes on a 7-8B
+#    quantized model.
+mnemosyne-continuity run \
+    --scenarios scenarios/continuity.jsonl \
+    --provider lmstudio \
+    --model <model-id-from-step-1> \
+    --verbose \
     --out /tmp/mnemosyne-continuity-lmstudio.json
 
-# 3. The summary JSON prints to stdout. Full per-scenario report is
+# 4. The summary JSON prints to stdout. Full per-scenario report is
 #    written to --out. Paste the summary into an issue or share it.
+```
+
+**Why `--verbose`?** Without it, a 50-scenario run is silent for
+10-20 minutes and it's easy to lose faith that anything's happening.
+`--verbose` streams a one-line result per scenario as they complete:
+
+```
+[ 1/50] ✓ cont-pref-01        preference
+[ 2/50] ✓ cont-pref-02        preference
+[ 3/50] ✗ cont-pref-03        preference
+...
+[31/50] ✓ cont-xses-01        preference [xsession]
 ```
 
 What you'll get back:

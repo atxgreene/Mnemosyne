@@ -182,6 +182,7 @@ def run_continuity(
     *,
     make_brain: Callable[[Path], Any],
     db_path: Path | None = None,
+    on_result: Callable[[int, int, "RunnerResult"], None] | None = None,
 ) -> dict[str, Any]:
     """Run all scenarios and return an aggregate report.
 
@@ -189,19 +190,32 @@ def run_continuity(
     a plant in scenario A can't leak into scenario B. `make_brain(db)`
     is a factory the caller supplies so we stay agnostic to model
     choice.
+
+    Optional ``on_result(index, total, result)`` callback fires after
+    each scenario completes — used by the CLI `--verbose` flag to
+    stream per-scenario pass/fail during long live-model runs (a 50-
+    scenario LM Studio run takes tens of minutes; users shouldn't
+    stare at a blank terminal).
     """
     results: list[RunnerResult] = []
-    for sc in scenarios:
+    total = len(scenarios)
+    for i, sc in enumerate(scenarios, start=1):
         if db_path is None:
             with tempfile.TemporaryDirectory() as td:
                 per_db = Path(td) / "memory.db"
-                results.append(_run_one_scenario(
+                r = _run_one_scenario(
                     sc, make_brain=make_brain, db_path=per_db,
-                ))
+                )
         else:
-            results.append(_run_one_scenario(
+            r = _run_one_scenario(
                 sc, make_brain=make_brain, db_path=db_path,
-            ))
+            )
+        results.append(r)
+        if on_result is not None:
+            try:
+                on_result(i, total, r)
+            except Exception:
+                pass  # progress reporting must never break the run
 
     # Aggregate
     total = len(results)
@@ -363,6 +377,11 @@ def _main(argv: list[str] | None = None) -> int:
         "--max-scenarios", type=int, default=None,
         help="cap scenarios run (smoke test / CI); default all"
     )
+    rp.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="print per-scenario pass/fail as they complete "
+             "(recommended for long live-model runs)",
+    )
 
     dp = sub.add_parser("dryrun",
                          help="dry-run: use the memory plumbing only, "
@@ -370,14 +389,32 @@ def _main(argv: list[str] | None = None) -> int:
     dp.add_argument("--scenarios", required=True)
     dp.add_argument("--out", default=None)
     dp.add_argument("--max-scenarios", type=int, default=None)
+    dp.add_argument("--verbose", "-v", action="store_true")
 
     args = p.parse_args(argv)
     scenarios = load_scenarios(args.scenarios)
     if getattr(args, "max_scenarios", None):
         scenarios = scenarios[: args.max_scenarios]
 
+    # Optional progress reporter for --verbose mode
+    def _make_progress() -> Callable[[int, int, dict], None] | None:
+        if not getattr(args, "verbose", False):
+            return None
+        def progress(i: int, total: int, r: dict) -> None:
+            status = "\033[1;32m✓\033[0m" if r["passed"] else "\033[1;31m✗\033[0m"
+            xsess = " [xsession]" if r.get("cross_session") else ""
+            print(
+                f"[{i:2d}/{total}] {status} {r['id']:18s}"
+                f"  {r.get('category', ''):10s}{xsess}",
+                flush=True,
+            )
+        return progress
+
+    _progress = _make_progress()
+
     if args.cmd == "dryrun":
-        report = run_continuity(scenarios, make_brain=_make_dry_brain)
+        report = run_continuity(scenarios, make_brain=_make_dry_brain,
+                                 on_result=_progress)
     else:
         # Live mode — late import to keep CLI --help fast
         import mnemosyne_models as mm_models
@@ -401,7 +438,8 @@ def _main(argv: list[str] | None = None) -> int:
                 memory=mem,
             )
 
-        report = run_continuity(scenarios, make_brain=_make)
+        report = run_continuity(scenarios, make_brain=_make,
+                                 on_result=_progress)
 
     summary = {
         k: v for k, v in report.items() if k != "results"

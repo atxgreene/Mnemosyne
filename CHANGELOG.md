@@ -2,6 +2,79 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.3] — 2026-04-17 — 8-bit pixel owl avatar + continuity runner verbose mode
+
+Pre-benchmark polish pass. Two user-facing improvements:
+
+**8-bit pixel owl avatar (`mnemosyne_avatar.py` + `mnemosyne_ui/static/avatar.js`)**
+
+Replaces the abstract-orb mascot with a recognizable 16×16 pixel owl
+rendered entirely from SVG rects. Every cell is a single `<rect>`
+with `shape-rendering="crispEdges"`; no raster assets, stays stdlib.
+
+- New `_OWL_SPRITE` constant: 16×16 grid of material chars
+  (`F` feather / `D` dark outline / `E` eye / `P` pupil / `K` beak /
+  `B` belly / `C` L0-instinct chest glow / `T` ear tuft). Strict
+  left/right symmetric; asserted at import time so editors can't
+  accidentally deform the owl.
+- New `_render_pixel_owl()` helper. Inputs: cx, cy, core_r, palette,
+  mood, health, pulse_s, calibration, restlessness. Outputs a list
+  of SVG fragments. Deterministic rect generation; breathing
+  animation on the owl group; tuft-sway animation when
+  restlessness > 0; pupil-drift animation when calibration is low.
+- Trait encoding preserved and expanded: `mood_phase` drives eye
+  state (full pupils / slits / closed); `health` drives feather
+  saturation; `pulses_per_minute` drives breathing period;
+  `calibration` drives pupil drift; `restlessness` drives tuft sway
+  frequency; `accent` palette colour becomes the L0 chest glow
+  (ties the visual to the v0.9 L0 Instinct tier).
+- `_build_l5_identity_block` and all other trait mappings unchanged
+  — the owl is a drop-in replacement for the former core-orb visual.
+- `mnemosyne_ui/static/avatar.js` gets a mirror `renderPixelOwl()`
+  function and matching `OWL_SPRITE` constant so the live dashboard
+  renders the same owl client-side as the Python export.
+- `docs/avatar-rest.svg` + `docs/avatar-active.svg` regenerated with
+  the new owl in representative rest-state and focus-state palettes.
+
+**Continuity runner: `--verbose` / `-v` streaming progress**
+
+`mnemosyne-continuity run` gained a `--verbose` flag that streams a
+one-line result per scenario as they complete. Useful for live-model
+runs where a full 50-scenario sweep can take 10-20 minutes on a
+local 7-8B quantized model; without progress output the terminal
+looked dead.
+
+- New `run_continuity(..., on_result=callable)` keyword. Fires after
+  each scenario with `(index, total, result)`. Wrapped in try/except
+  so a broken reporter can never take down the benchmark.
+- CLI: `--verbose` / `-v` available on both `run` and `dryrun`
+  subcommands. When set, prints colored `✓`/`✗` + scenario id +
+  category + `[xsession]` marker for cross-session scenarios.
+
+**`bench/README.md` quick-path refresh**
+
+- Added the "sanity-first: run 5 scenarios before committing to 50"
+  pattern, since confirming LM Studio responds correctly on a short
+  run before the 10-minute full run saves hours of debug on model
+  misconfiguration.
+- Example output block shows what `--verbose` looks like.
+- Wall-clock estimate formula added: `N × model_turn_latency × 2`.
+
+**Tests:** 288 → 291 green. 3 new:
+- avatar v0.9.3: 8-bit owl sprite is 16x16 and left-right symmetric
+- avatar v0.9.3: rest mood closes the owl's eyes (no pupil cells)
+- avatar v0.9.3: pixel-owl breathing + tuft-sway animations embedded
+
+Also: updated the existing `avatar: render_svg returns a valid SVG`
+test to check for the new pixel-owl markers (`mnemo-owl`,
+`shape-rendering="crispEdges"`) instead of the old abstract-orb
+`<ellipse>` eye.
+
+**Packaging:** `pyproject.toml` 0.9.2 → 0.9.3. No new modules, no
+new entry points.
+
+pyflakes clean. Ready for tonight's LM Studio continuity benchmark.
+
 ## [0.9.2] — 2026-04-17 — tool result budgeting + canonical memory-tiers doc
 
 Ships the first concrete v0.9.2 candidate from the Rohit Yadav Claude
