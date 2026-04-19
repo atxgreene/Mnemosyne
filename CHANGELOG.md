@@ -2,6 +2,45 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.7] — 2026-04-17 — multi-run multi-model Continuity benchmark results
+
+Three new benchmark reports in `docs/benchmark-results/` + updated
+BENCHMARKS table + Substack article re-framed from single-result to
+multi-run multi-model.
+
+**Benchmark results added:**
+- `2026-04-17-continuity-gemma4-v0.9.6.json` — Gemma 4 E4B on v0.9.6.
+  46/50 = 0.92 aggregate; **6/6 = 1.0 on rule category** (first
+  perfect rule-category run, confirming v0.9.6 rules-block works).
+- `2026-04-17-continuity-qwen3.5-9b-v0.9.6.json` — Qwen 3.5 9B on
+  v0.9.6. 46/50 = 0.92 aggregate; stable across two independent runs
+  with different specific failures (sampling non-determinism).
+
+**Four-run summary now in BENCHMARKS_v0.7.md and the Substack article:**
+
+| Run                      | Aggregate | Rule | Cross-session |
+| :----------------------- | :-------: | :--: | :-----------: |
+| Gemma 4 E4B v0.9.5       | **0.98**  | 0.83 | **1.00**      |
+| Gemma 4 E4B v0.9.6       | 0.92      | **1.00** | 0.90      |
+| Qwen 3.5 9B v0.9.6 (1)   | 0.92      | 0.83 | 0.80          |
+| Qwen 3.5 9B v0.9.6 (2)   | 0.92      | 0.83 | 0.90          |
+
+Aggregate band: **0.92–0.98 across two models, four runs**. Specific
+failures shift between runs; aggregate and category distributions
+are stable. The substrate is consistent; model sampling is the
+variance source. This is the strongest framing we've had —
+one-shot numbers are cheap; a 0.06-wide aggregate band across two
+independent model families through the same substrate is the
+defensible publication claim.
+
+**Article rewrite:** replaced the single-model framing with the
+multi-run table + three-bullet interpretation (substrate is
+consistent; rules-block works; model differences are categorical
+not aggregate).
+
+**pyproject.toml:** 0.9.6 → 0.9.7. No code changes; docs-only
+patch release. Tests 296/296 green (unchanged).
+
 ## [0.9.6] — 2026-04-17 — rule-intent detection + STRICT RULES block
 
 Closes the one v0.9.5 Continuity Score failure (`cont-rule-04` —

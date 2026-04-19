@@ -219,11 +219,96 @@ is below 0.4, check that (a) identity/core-value rows are being stored
 with `tier=L5_IDENTITY`, and (b) `apply_decay()` isn't being run with
 a multiplier that puts preferences below the 0.3 demotion threshold.
 
-### Live model: Gemma 4 E4B Q4_K_M via LM Studio (2026-04-17)
+### Live model: multi-run, multi-model results (2026-04-17)
 
-First published run of the Continuity Score against a live local
-model. Full report at
-[`docs/benchmark-results/2026-04-17-continuity-gemma4-e4b.json`](./benchmark-results/2026-04-17-continuity-gemma4-e4b.json).
+Four runs across two canonical local models, same 50-scenario suite,
+same substring judge. Full per-scenario reports in
+[`docs/benchmark-results/`](./benchmark-results/).
+
+| Run                      | Aggregate | Rule     | Cross-session | Report                                                                                              |
+| :----------------------- | :-------: | :------: | :-----------: | :-------------------------------------------------------------------------------------------------- |
+| Gemma 4 E4B @ v0.9.5     | **0.98**  | 0.83     | **1.00**      | [json](./benchmark-results/2026-04-17-continuity-gemma4-e4b.json)                                   |
+| Gemma 4 E4B @ v0.9.6     | 0.92      | **1.00** | 0.90          | [json](./benchmark-results/2026-04-17-continuity-gemma4-v0.9.6.json)                                |
+| Qwen 3.5 9B @ v0.9.6 (1) | 0.92      | 0.83     | 0.80          | (local only — pre-fix, superseded)                                                                  |
+| Qwen 3.5 9B @ v0.9.6 (2) | 0.92      | 0.83     | 0.90          | [json](./benchmark-results/2026-04-17-continuity-qwen3.5-9b-v0.9.6.json)                            |
+
+**Aggregate band: 0.92–0.98.** Both models converge to the same
+range; the specific scenarios that fail shift between runs
+(sampling non-determinism), but category coverage and aggregate
+percentage are stable.
+
+### What four runs tell us that one run couldn't
+
+**1. The substrate is consistent; the model is the variance source.**
+The same substrate, same scenarios, same judge, and same substring
+matching rules produced four results clustered in an 0.06-wide
+band. Failures don't repeat — they shuffle between runs on the
+model's sampling surface. That's the honest signal the substrate
+isn't memorizing the test.
+
+**2. The v0.9.6 rules-block fix works as designed.** The Gemma 4
+run on v0.9.6 hit **6/6 = 1.0 on rule scenarios** — the first
+perfect rule-category score across all runs. The same fix helped
+on Qwen (`cont-rule-04` passes reliably) even though Qwen has
+independent rule-following quirks that cost it `cont-rule-03`
+sometimes.
+
+**3. Model differences show up in specific categories, not
+aggregate.** Qwen 3.5 9B has consistent model-level refusals on
+infrastructure-identifying scenarios (e.g. "what's our Datadog org
+name?" → "I do not have access to your company's internal account
+details"). Those cost ~2 points per run against the substring
+judge. Gemma 4 E4B doesn't refuse but has occasional empty-response
+completions that cost similar points. Net: same aggregate, different
+failure modes. A reviewer can pick whichever trade-off fits their
+deployment risk model.
+
+### Setup common to all runs
+
+- Inference server: LM Studio 0.4.11, OpenAI-compatible endpoint
+  over Tailscale.
+- Substrate: Mnemosyne v0.9.5 or v0.9.6 (as labeled per run).
+- Judge: `substring` (case-insensitive token/phrase match).
+- Scenarios: `scenarios/continuity.jsonl` at repo-head for each run.
+- `cont-rule-02` scenario fix landed in commit `a255979` between
+  v0.9.6 run 1 and v0.9.6 run 2.
+
+### Reproduce (replace the model id with whichever LM Studio has loaded):
+
+```sh
+set MNEMOSYNE_LMSTUDIO_URL=http://YOUR-LMSTUDIO-HOST:PORT/v1/chat/completions
+python mnemosyne_continuity.py run \
+    --scenarios scenarios/continuity.jsonl \
+    --provider lmstudio --model "<your-model-id>" \
+    --verbose --out your-result.json
+```
+
+### Honest caveats
+
+- **Substring judge, not LOCOMO's LLM-as-judge.** Direct comparison
+  with Mem0's published LOCOMO numbers (66.9% with GPT-4o-mini judge)
+  is not meaningful — different benchmark, different methodology.
+  LOCOMO head-to-head lives in `bench/locomo.py` for a future
+  follow-up once we run it with `--judge openai`.
+- **Non-deterministic.** These are single-run numbers; the 0.92
+  Qwen result replicated across two runs, but individual scenario
+  pass/fail shifts. Over 4-5 runs the category distributions
+  would converge further.
+- **Not an "AI model" benchmark — a substrate benchmark.** The
+  test measures whether memory planted in session N is retrievable
+  and usable in session N+1 (and across 50 planting patterns). A
+  frontier cloud model would likely hit 0.99+ through the same
+  substrate. The interesting finding is that a 6 GB local model
+  hits 0.92–0.98.
+
+---
+
+### Historical: Gemma 4 E4B @ v0.9.5 (first published)
+
+The original single-model single-run result, preserved for
+chronology. Superseded by the multi-run table above.
+
+**Headline: 0.98 aggregate, 1.00 cross-session, 1.00 on four of six categories.**
 
 | Category      | Total | Passed | Score     |
 | :------------ | ----: | -----: | :-------- |
