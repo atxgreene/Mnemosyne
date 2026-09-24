@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import subprocess
@@ -17,6 +18,11 @@ _BARE_INSTALL = re.compile(
     re.IGNORECASE,
 )
 _ACTION_PIN = re.compile(r"^\s*-\s+uses:\s+([^\s@]+)@([^\s#]+)", re.MULTILINE)
+_PUBLIC_DOC_EXTENSIONS = frozenset({".htm", ".html", ".markdown", ".md", ".mdx", ".rst", ".txt"})
+_PUBLIC_DOC_BASENAMES = frozenset({"install", "installation", "readme", "release", "setup"})
+_PUBLIC_INSTALL_NAME_MARKERS = ("install", "release", "setup")
+_SHELL_BLOCK = re.compile(r"```(?:bash|console|sh|shell)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+_HTML_CODE_BLOCK = re.compile(r'<div class="code">(.*?)</div>', re.DOTALL | re.IGNORECASE)
 
 
 def bare_pypi_claims(text: str) -> list[str]:
@@ -26,14 +32,59 @@ def bare_pypi_claims(text: str) -> list[str]:
 
 
 def public_install_surfaces() -> list[Path]:
-    """Return every current public surface that can carry install guidance."""
-    paths = {
-        *(_REPO.glob("*.md")),
-        *((_REPO / "docs").rglob("*.md")),
-        *((_REPO / "docs").rglob("*.html")),
-        _REPO / "integrations" / "hermes" / "README.md",
-    }
+    """Return tracked public documentation/install surfaces without directory omissions."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=_REPO,
+        check=True,
+        capture_output=True,
+    ).stdout.split(b"\0")
+    paths = []
+    for raw_path in tracked:
+        if not raw_path:
+            continue
+        relative = Path(raw_path.decode("utf-8"))
+        stem = relative.stem.lower()
+        if (
+            relative.suffix.lower() in _PUBLIC_DOC_EXTENSIONS
+            or stem in _PUBLIC_DOC_BASENAMES
+            or (
+                relative.suffix.lower() == ".sh"
+                and any(marker in stem for marker in _PUBLIC_INSTALL_NAME_MARKERS)
+            )
+        ):
+            paths.append(_REPO / relative)
     return sorted(paths)
+
+
+def packaged_console_scripts() -> set[str]:
+    """Return the wheel's declared console commands without importing build tooling."""
+    pyproject = (_REPO / "pyproject.toml").read_text(encoding="utf-8")
+    scripts = pyproject.split("[project.scripts]", 1)[1].split("\n[", 1)[0]
+    return {
+        match.group(1)
+        for match in re.finditer(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=", scripts, re.MULTILINE)
+    }
+
+
+def documented_post_install_commands(path: Path) -> list[tuple[str, bool]]:
+    """Return Mnemosyne commands in install blocks and whether each is checkout-only."""
+    text = path.read_text(encoding="utf-8")
+    blocks = list(_SHELL_BLOCK.findall(text)) + list(_HTML_CODE_BLOCK.findall(text))
+    claims = []
+    for raw_block in blocks:
+        plain = html.unescape(re.sub(r"<[^>]+>", "", raw_block))
+        if "pip install" not in plain or not re.search(
+            r"mnemosyne(?:-harness)?", plain, re.IGNORECASE
+        ):
+            continue
+        checkout_only = "checkout-only" in plain.lower()
+        for match in re.finditer(
+            r"(?m)^\s*(?:\$\s*)?(?:bash\s+)?(?:\./)?(mnemosyne-[A-Za-z0-9._-]+)",
+            plain,
+        ):
+            claims.append((match.group(1), checkout_only))
+    return claims
 
 
 class PublicClaimsTests(unittest.TestCase):
@@ -62,7 +113,11 @@ class PublicClaimsTests(unittest.TestCase):
         self.assertIn(Path("SETUP.md"), relative)
         self.assertIn(Path("docs/index.html"), relative)
         self.assertIn(Path("docs/articles/v0.8-launch-substack.md"), relative)
+        self.assertIn(Path("bench/README.md"), relative)
         self.assertIn(Path("integrations/hermes/README.md"), relative)
+        self.assertIn(Path("integrations/hermes/VALIDATION.md"), relative)
+        self.assertIn(Path("install-mnemosyne.sh"), relative)
+        self.assertIn(Path("deploy/install-service.sh"), relative)
 
     def test_packaged_integration_readme_mutation_catches_quoted_extra(self):
         readme = (_REPO / "integrations" / "hermes" / "README.md").read_text(
@@ -96,10 +151,30 @@ class PublicClaimsTests(unittest.TestCase):
         self.assertNotIn("prefetch (non-blocking)", page)
         self.assertNotIn("fresh-session recall", page)
         self.assertNotIn("8/8", page)
-        self.assertNotIn("enabled  user  0.1.0  mnemosyne", page)
+        self.assertNotIn("hermes plugins enable mnemosyne", page)
+        self.assertNotIn("hermes plugins list", page)
+        self.assertNotIn("enabled  user", page)
         self.assertIn("v0.21.4", page)
-        self.assertIn("enabled  user  0.9.8  mnemosyne", page)
+        self.assertIn("hermes config set memory.provider mnemosyne", page)
+        self.assertIn("hermes memory status", page)
         self.assertIn("tiers L2–L4", page)
+
+    def test_post_install_commands_are_packaged_or_explicitly_checkout_only(self):
+        packaged = packaged_console_scripts()
+        claims = {
+            path.relative_to(_REPO): documented_post_install_commands(path)
+            for path in public_install_surfaces()
+        }
+        self.assertTrue(any(commands for commands in claims.values()))
+        failures = []
+        for path, commands in claims.items():
+            for command, checkout_only in commands:
+                if command in packaged:
+                    continue
+                if checkout_only and (_REPO / command).is_file():
+                    continue
+                failures.append(f"{path}: {command}")
+        self.assertEqual(failures, [])
 
     def test_public_tests_use_neutral_synthetic_identities(self):
         personal_names = (
@@ -158,6 +233,14 @@ class ReleaseMechanicsTests(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertRegex(ref, r"^[0-9a-f]{40}$")
                 self.assertEqual(ref, expected[action])
+        checkout_steps = re.findall(
+            r"(?ms)^\s*- uses: actions/checkout@[^\n]+\n(?P<body>(?:\s{8,}[^\n]*\n)*)",
+            workflow,
+        )
+        self.assertTrue(checkout_steps)
+        for body in checkout_steps:
+            with self.subTest(step=body):
+                self.assertRegex(body, r"(?m)^\s+persist-credentials:\s*false\s*$")
 
     def test_build_backend_is_exactly_pinned(self):
         pyproject = (_REPO / "pyproject.toml").read_text(encoding="utf-8")

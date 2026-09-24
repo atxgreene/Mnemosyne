@@ -553,9 +553,9 @@
 <span class="p">$</span> <span class="k">mnemosyne-serve</span> &amp;                      <span class="c"># daemon + dashboard</span>
 <span class="p">$</span> <span class="k">open</span> http://127.0.0.1:8484/ui          <span class="c"># avatar evolves in real time</span>
 
-<span class="c"># or drop it into Hermes as a memory provider:</span>
-<span class="p">$</span> <span class="k">hermes plugins enable</span> mnemosyne
-<span class="p">$</span> <span class="k">hermes plugins list</span>     <span class="o">→ enabled  user  0.9.8  mnemosyne</span></div>
+<span class="c"># select the installed memory-provider entry point in Hermes:</span>
+<span class="p">$</span> <span class="k">hermes config set</span> memory.provider mnemosyne
+<span class="p">$</span> <span class="k">hermes memory status</span>    <span class="o">→ provider: mnemosyne</span></div>
     </div>
     <div class="verify-row">
       <span class="chip">Verify: <b>python3 tests/test_all.py</b></span>
@@ -661,9 +661,9 @@ document.querySelectorAll('.stat .num[data-count]').forEach(el=>co.observe(el));
   const body=document.getElementById('termBody');
   if(!term||!body) return;
   const lines=[
-    {t:'<span class="term-cmd"><span class="pr">$</span> hermes plugins enable mnemosyne</span>',d:380},
-    {t:'<span class="term-dim">→ discovering memory providers…</span>',d:320},
-    {t:'<span class="term-check">  plugin discovery             </span><span class="term-pass">PASS</span>',d:260},
+    {t:'<span class="term-cmd"><span class="pr">$</span> hermes config set memory.provider mnemosyne</span>',d:380},
+    {t:'<span class="term-dim">→ selecting installed memory-provider entry point…</span>',d:320},
+    {t:'<span class="term-check">  provider discovery           </span><span class="term-pass">PASS</span>',d:260},
     {t:'<span class="term-check">  provider load + availability </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-check">  session initialization       </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-check">  tool routing · write/search  </span><span class="term-pass">PASS</span>',d:230},
