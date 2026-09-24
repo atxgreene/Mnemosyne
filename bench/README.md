@@ -1,9 +1,10 @@
 # Comparative benchmarks (`bench/`)
 
-Stuff in this directory **is not part of the Mnemosyne distribution.** It
-ships in the repo so the methodology is reproducible, but it is not
-installed by `pip install mnemosyne-harness`, has its own optional
-deps (see `requirements.txt`), and is not tested in CI.
+Stuff in this directory **is not part of the installed wheel.** It ships in
+the source repository so the methodology is reproducible and has its own
+optional dependencies (see `requirements.txt`). CI runs the offline benchmark
+self-tests, judge regressions, and sanitizer checks; it does not download the
+datasets or call a model/API.
 
 The point: when someone asks "OK, but what does Mnemosyne actually
 score on LOCOMO vs Mem0?", we have a runnable answer in the same
@@ -115,17 +116,22 @@ gets committed.
 
 ### Retrieval track (fast, no API key, deterministic)
 
-The zero-cost path: retrieval-only with the substring judge
-(case-insensitive substring / token match between expected answer
-and retrieved context) plus **evidence recall@k** (judge-free —
-fraction of gold `evidence` dia_ids found in the top-k retrieved
-rows). Full 1,986-question run takes ~15 s and 0 USD. Published
-numbers: [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md).
+The zero-cost path reports **evidence recall@k** (judge-free — fraction of
+gold `evidence` dialogue IDs found in the top-k rows) and deterministic lexical
+`answer_coverage`. Answer coverage is a diagnostic over retrieved text, **not
+answer accuracy**. The hardened judge does not pass a response merely because
+one four-character token overlaps. Published aggregate-only evidence:
+[`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md).
 
 ```sh
-# Headline retrieval run (FTS5 top-8) — the substrate number
+# Retrieval run (FTS5 top-8)
 python3 bench/locomo.py --substrate mnemosyne --retrieval-mode fts \
-    --out bench/results/locomo-fts-full.json
+    --judge answer_coverage --out bench/results/locomo-fts-raw.json
+
+# Strip dataset text and per-question rows before publishing an aggregate
+python3 bench/sanitize_results.py \
+    bench/results/locomo-fts-raw.json \
+    bench/results/locomo-fts-aggregate.json
 
 # Same-protocol baselines + ceiling for the comparison table
 python3 bench/locomo.py --substrate mnemosyne --retrieval-mode recency \
@@ -135,21 +141,19 @@ python3 bench/locomo.py --substrate mnemosyne --retrieval-mode random \
 python3 bench/locomo.py --substrate mnemosyne --retrieval-mode full \
     --out bench/results/locomo-full-full.json
 
-# Token/score trade-off sweep
+# Token/coverage and judge-free evidence-recall trade-off sweep
 for k in 2 4 8 16 32; do
   python3 bench/locomo.py --substrate mnemosyne --top-k $k \
       --out bench/results/locomo-fts-k$k.json
 done
 ```
 
-Scoring protocol: the headline `score` covers the **1,540
-non-adversarial questions** (categories 1-4), matching how published
-LOCOMO evals (e.g. Mem0, arXiv 2504.19413) report theirs. Category 5
-(adversarial, 446 questions) requires a model to *abstain*, which is
-meaningless without an LLM; it is judged by abstention-phrase
-detection in `--llm-grounded` runs and reported separately. Every
-report JSON embeds dataset sha256, git commit, latency p50/p95,
-token estimates, ingest throughput, and the exact argv.
+Protocol: lexical coverage covers the **1,540 non-adversarial questions**
+(categories 1-4). Category 5 (446 adversarial questions) requires a model to
+abstain, so retrieval-only mode leaves it unscored and reports it separately.
+Raw reports embed dataset SHA-256, git commit, latency, token estimates,
+throughput, command arguments, and per-question rows. Raw reports remain in
+the gitignored `bench/results/`; publish only sanitizer-produced aggregates.
 
 ### LLM-grounded (measures the full agent stack)
 
@@ -223,6 +227,8 @@ conversation samples or outputs).
 |---|---|
 | `locomo.py` | LOCOMO runner with `MnemosyneSubstrate` + `Mem0Substrate` adapters. Retrieval-only + LLM-grounded modes, baseline retrieval modes (recency/random/full), evidence recall@k, latency/token/cost instrumentation. |
 | `longmemeval.py` | LongMemEval runner (arXiv 2410.10813). Session-level + turn-level retrieval recall@k, abstention handling, same instrumentation. `--selftest` validates the runner on a synthetic schema-faithful fixture with no dataset/network/LLM. |
+| `sanitize_results.py` | Removes dataset/per-question text and local-path arguments, adds source SHA-256 provenance, and validates aggregate-only public artifacts. |
+| `test_benchmark.py` | Offline adversarial judge and sanitizer regressions. |
 | `requirements.txt` | Optional deps — `datasets`, `mem0ai`, `openai`, `sentence-transformers`, `tiktoken`. NOT in main pyproject. |
 | `README.md` | This file. |
 
@@ -284,11 +290,11 @@ in `docs/BENCHMARKS_v0.7.md` with credit to the runner.
 
 ## Status as of v0.9.8
 
-- `locomo.py` — full retrieval track **run and published**
-  (2026-06-11): FTS top-8 0.6247 vs recency 0.2468 / random 0.2799 /
-  full-context ceiling 0.8727 over the 1,540 non-adversarial
-  questions. See [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md)
-  and [`docs/benchmark-results/2026-06-11-locomo-retrieval-track.json`](../docs/benchmark-results/2026-06-11-locomo-retrieval-track.json).
+- `locomo.py` — full retrieval track run in 2026-06-11. The public
+  aggregate's primary comparable metric is judge-free FTS top-8 evidence
+  recall@8 of 0.5009 (recency 0.0054, random 0.0198, full conversation
+  0.9961). Historical lexical values are labeled `legacy_answer_coverage`,
+  not accuracy. See [`docs/BENCHMARKS_LOCOMO.md`](../docs/BENCHMARKS_LOCOMO.md).
 - `longmemeval.py` — runner shipped with `--selftest` (passing);
   retrieval numbers pending a machine with HuggingFace access (the
   dataset is HF/Drive-only).

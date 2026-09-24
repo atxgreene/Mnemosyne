@@ -1,114 +1,123 @@
 {
+  "_metadata": {
+    "artifact_scope": "aggregate-only; no dataset questions, answers, responses, or per-question records",
+    "benchmark": "LOCOMO efficiency frontier (retrieval substrate)",
+    "date_utc": "2026-07-01 06:47:52",
+    "full_context_tokens_ref": 26000,
+    "full_context_tokens_ref_source": "Mem0 arXiv:2504.19413 (~26k tok/conv)",
+    "historical_git_commit": "c689494",
+    "input_price_per_1m_usd": 0.15,
+    "metric_notice": "Legacy values use the retired any-one-token/phrase judge. They are lexical coverage diagnostics, not answer accuracy, and are not comparable to the hardened v0.9.8 judge.",
+    "python": "3.11.15",
+    "retrieval_cost_usd": 0.0,
+    "runner": "bench/efficiency_frontier.py v0.9.8"
+  },
+  "_provenance": {
+    "dataset_text_included": false,
+    "per_question_records_omitted": true,
+    "sanitizer": "bench/sanitize_results.py v1 plus legacy-metric relabel migration",
+    "source_bytes": 3064,
+    "source_name": "2026-07-01-locomo-efficiency-frontier.json",
+    "source_sha256": "c4527967563099015fa24c189805309743ed7f6d44da06926670950b70774700"
+  },
   "frontier": [
     {
-      "k": 2,
-      "answer_in_context": 0.4377,
-      "evidence_recall": 0.3436,
       "context_tokens_per_probe": 81,
-      "search_p50_ms": 1.72,
-      "search_p95_ms": 3.0,
-      "questions": 1540,
-      "utility_per_1k_tokens": 5.4037,
+      "cost_per_1k_questions_usd": 0.01215,
+      "evidence_recall": 0.3436,
+      "k": 2,
+      "legacy_answer_coverage": 0.4377,
+      "legacy_coverage_per_1k_tokens": 5.4037,
       "pct_of_full_context_tokens": 0.312,
-      "cost_per_1k_questions_usd": 0.01215
+      "questions": 1540,
+      "search_p50_ms": 1.72,
+      "search_p95_ms": 3.0
     },
     {
-      "k": 4,
-      "answer_in_context": 0.5422,
-      "evidence_recall": 0.4201,
       "context_tokens_per_probe": 160,
-      "search_p50_ms": 2.12,
-      "search_p95_ms": 4.19,
-      "questions": 1540,
-      "utility_per_1k_tokens": 3.3887,
+      "cost_per_1k_questions_usd": 0.024,
+      "evidence_recall": 0.4201,
+      "k": 4,
+      "legacy_answer_coverage": 0.5422,
+      "legacy_coverage_per_1k_tokens": 3.3887,
       "pct_of_full_context_tokens": 0.615,
-      "cost_per_1k_questions_usd": 0.024
+      "questions": 1540,
+      "search_p50_ms": 2.12,
+      "search_p95_ms": 4.19
     },
     {
-      "k": 8,
-      "answer_in_context": 0.6247,
-      "evidence_recall": 0.5009,
       "context_tokens_per_probe": 319,
-      "search_p50_ms": 2.62,
-      "search_p95_ms": 19.43,
-      "questions": 1540,
-      "utility_per_1k_tokens": 1.9583,
+      "cost_per_1k_questions_usd": 0.04785,
+      "evidence_recall": 0.5009,
+      "k": 8,
+      "legacy_answer_coverage": 0.6247,
+      "legacy_coverage_per_1k_tokens": 1.9583,
       "pct_of_full_context_tokens": 1.227,
-      "cost_per_1k_questions_usd": 0.04785
+      "questions": 1540,
+      "search_p50_ms": 2.62,
+      "search_p95_ms": 19.43
     },
     {
-      "k": 16,
-      "answer_in_context": 0.6948,
-      "evidence_recall": 0.5602,
       "context_tokens_per_probe": 643,
-      "search_p50_ms": 3.66,
-      "search_p95_ms": 21.68,
-      "questions": 1540,
-      "utility_per_1k_tokens": 1.0806,
+      "cost_per_1k_questions_usd": 0.09645,
+      "evidence_recall": 0.5602,
+      "k": 16,
+      "legacy_answer_coverage": 0.6948,
+      "legacy_coverage_per_1k_tokens": 1.0806,
       "pct_of_full_context_tokens": 2.473,
-      "cost_per_1k_questions_usd": 0.09645
+      "questions": 1540,
+      "search_p50_ms": 3.66,
+      "search_p95_ms": 21.68
     },
     {
-      "k": 32,
-      "answer_in_context": 0.7552,
-      "evidence_recall": 0.6264,
       "context_tokens_per_probe": 1296,
-      "search_p50_ms": 6.43,
-      "search_p95_ms": 27.71,
-      "questions": 1540,
-      "utility_per_1k_tokens": 0.5827,
+      "cost_per_1k_questions_usd": 0.1944,
+      "evidence_recall": 0.6264,
+      "k": 32,
+      "legacy_answer_coverage": 0.7552,
+      "legacy_coverage_per_1k_tokens": 0.5827,
       "pct_of_full_context_tokens": 4.985,
-      "cost_per_1k_questions_usd": 0.1944
+      "questions": 1540,
+      "search_p50_ms": 6.43,
+      "search_p95_ms": 27.71
     }
   ],
   "full_context_baseline": {
-    "answer_in_context": 0.8727,
     "context_tokens_per_probe": 22576,
-    "cost_per_1k_questions_usd": 3.3864
+    "cost_per_1k_questions_usd": 3.3864,
+    "legacy_answer_coverage": 0.8727
+  },
+  "historical_summary": {
+    "cost_ratio_full_over_deepest": 17.4,
+    "deepest_point": {
+      "context_tokens_per_probe": 1296,
+      "k": 32,
+      "legacy_answer_coverage": 0.7552,
+      "pct_of_ceiling_legacy_coverage": 86.5,
+      "token_savings_vs_full_pct": 94.26
+    },
+    "most_efficient_point": {
+      "context_tokens_per_probe": 81,
+      "k": 2,
+      "legacy_answer_coverage": 0.4377,
+      "legacy_coverage_per_1k_tokens": 5.4037
+    }
   },
   "tokens_to_reach": [
     {
-      "target": 0.5,
+      "context_tokens_per_probe": 160,
       "k": 4,
-      "context_tokens_per_probe": 160
+      "legacy_coverage_target": 0.5
     },
     {
-      "target": 0.6,
+      "context_tokens_per_probe": 319,
       "k": 8,
-      "context_tokens_per_probe": 319
+      "legacy_coverage_target": 0.6
     },
     {
-      "target": 0.7,
-      "k": 32,
-      "context_tokens_per_probe": 1296
-    }
-  ],
-  "headline": {
-    "most_efficient_point": {
-      "k": 2,
-      "answer_in_context": 0.4377,
-      "context_tokens_per_probe": 81,
-      "utility_per_1k_tokens": 5.4037
-    },
-    "deepest_point": {
-      "k": 32,
-      "answer_in_context": 0.7552,
       "context_tokens_per_probe": 1296,
-      "pct_of_ceiling_accuracy": 86.5,
-      "token_savings_vs_full_pct": 94.26
-    },
-    "cost_ratio_full_over_deepest": 17.4
-  },
-  "_metadata": {
-    "benchmark": "LOCOMO efficiency frontier (retrieval substrate)",
-    "runner": "bench/efficiency_frontier.py v0.9.8",
-    "full_context_tokens_ref": 26000,
-    "full_context_tokens_ref_source": "Mem0 arXiv:2504.19413 (~26k tok/conv)",
-    "input_price_per_1m_usd": 0.15,
-    "retrieval_cost_usd": 0.0,
-    "git_commit": "c689494",
-    "python": "3.11.15",
-    "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
-    "date_utc": "2026-07-01 06:47:52"
-  }
+      "k": 32,
+      "legacy_coverage_target": 0.7
+    }
+  ]
 }

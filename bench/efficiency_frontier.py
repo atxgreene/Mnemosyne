@@ -10,9 +10,9 @@ retrieval takes, and whether any of it runs locally.
 This benchmark reframes the question. It sweeps retrieval depth (top-k) and
 reports the **efficiency frontier**:
 
-  * answer-in-context accuracy vs. context tokens spent per probe,
-  * **answer utility per 1k context tokens** — the norm-breaking metric,
-  * tokens needed to reach an accuracy target,
+  * deterministic lexical answer coverage vs. context tokens spent per probe,
+  * **coverage per 1k context tokens** — an efficiency diagnostic,
+  * tokens needed to reach a coverage target,
   * a cost model — $ per 1,000 questions at a configurable answer-LLM input
     price — for the retrieved context vs. the full-conversation baseline,
   * search latency p50/p95 at each depth.
@@ -38,7 +38,6 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -72,27 +71,27 @@ def _score_at_k(dataset_path: Path | None, k: int, db_path: Path,
     sub = MnemosyneSubstrate(db_path=db_path, llm_grounded=False,
                              retrieval_mode="fts", top_k=k)
     try:
-        report = locomo_run(sub, samples, judge="substring",
+        report = locomo_run(sub, samples, judge="answer_coverage",
                             llm_grounded=False)
     finally:
         sub.close()
     tokens = report["tokens"]["context_per_probe_mean_est"]
     return {
         "k": k,
-        "answer_in_context": report["score"],
+        "answer_coverage": report["answer_coverage"]["rate"],
         "evidence_recall": report["evidence_recall"]["mean"],
         "context_tokens_per_probe": tokens,
         "search_p50_ms": report["latency"]["search"]["p50_ms"],
         "search_p95_ms": report["latency"]["search"]["p95_ms"],
-        "questions": report["total"],
+        "questions": report["answer_coverage"]["total"],
     }
 
 
 def _tokens_to_reach(frontier: list[dict[str, Any]],
                      target: float) -> dict[str, Any] | None:
-    """Smallest-k point that reaches `target` answer-in-context, if any."""
+    """Smallest-k point that reaches `target` lexical coverage, if any."""
     for row in sorted(frontier, key=lambda r: r["k"]):
-        if row["answer_in_context"] >= target:
+        if row["answer_coverage"] >= target:
             return {"target": target, "k": row["k"],
                     "context_tokens_per_probe": row["context_tokens_per_probe"]}
     return None
@@ -105,11 +104,11 @@ def build_frontier(dataset_path: Path | None, ks: list[int], db_path: Path,
     for k in ks:
         t0 = time.monotonic()
         row = _score_at_k(dataset_path, k, db_path)
-        # Answer utility per 1k context tokens — the headline efficiency
-        # metric: how much correct-answer coverage each 1k tokens buys.
+        # Lexical coverage per 1k context tokens. This is an efficiency
+        # diagnostic, not answer accuracy.
         tok = max(1, row["context_tokens_per_probe"])
-        row["utility_per_1k_tokens"] = round(
-            row["answer_in_context"] / (tok / 1000.0), 4)
+        row["coverage_per_1k_tokens"] = round(
+            row["answer_coverage"] / (tok / 1000.0), 4)
         row["pct_of_full_context_tokens"] = round(
             100.0 * tok / _FULL_CONTEXT_TOKENS_REF, 3)
         # Cost model: $ per 1,000 questions to feed this retrieved context to
@@ -118,8 +117,8 @@ def build_frontier(dataset_path: Path | None, ks: list[int], db_path: Path,
             (tok / 1_000_000.0) * input_price_per_1m * 1000.0, 6)
         frontier.append(row)
         if verbose:
-            print(f"  k={k:2d}  acc={row['answer_in_context']:.4f}  "
-                  f"tok={tok:5d}  util/1k={row['utility_per_1k_tokens']:.4f}  "
+            print(f"  k={k:2d}  coverage={row['answer_coverage']:.4f}  "
+                  f"tok={tok:5d}  cov/1k={row['coverage_per_1k_tokens']:.4f}  "
                   f"p50={row['search_p50_ms']}ms  "
                   f"({time.monotonic()-t0:.1f}s)", flush=True)
 
@@ -132,20 +131,22 @@ def build_frontier(dataset_path: Path | None, ks: list[int], db_path: Path,
     sub = MnemosyneSubstrate(db_path=db_path, llm_grounded=False,
                              retrieval_mode="full")
     try:
-        full = locomo_run(sub, samples, judge="substring", llm_grounded=False)
+        full = locomo_run(
+            sub, samples, judge="answer_coverage", llm_grounded=False
+        )
     finally:
         sub.close()
     full_tok = full["tokens"]["context_per_probe_mean_est"]
     full_row = {
-        "answer_in_context": full["score"],
+        "answer_coverage": full["answer_coverage"]["rate"],
         "context_tokens_per_probe": full_tok,
         "cost_per_1k_questions_usd": round(
             (full_tok / 1_000_000.0) * input_price_per_1m * 1000.0, 6),
     }
 
     # Norm-breaking summary: best retrieved point vs the full-context norm.
-    best = max(frontier, key=lambda r: r["utility_per_1k_tokens"])
-    knee = max(frontier, key=lambda r: r["answer_in_context"])  # deepest k
+    best = max(frontier, key=lambda r: r["coverage_per_1k_tokens"])
+    knee = max(frontier, key=lambda r: r["answer_coverage"])  # deepest k
     token_savings = (1 - knee["context_tokens_per_probe"] / full_tok
                      if full_tok else 0.0)
     return {
@@ -155,21 +156,21 @@ def build_frontier(dataset_path: Path | None, ks: list[int], db_path: Path,
             t for t in (_tokens_to_reach(frontier, x) for x in (0.5, 0.6, 0.7))
             if t is not None
         ],
-        "headline": {
+        "summary": {
             "most_efficient_point": {
                 "k": best["k"],
-                "answer_in_context": best["answer_in_context"],
+                "answer_coverage": best["answer_coverage"],
                 "context_tokens_per_probe": best["context_tokens_per_probe"],
-                "utility_per_1k_tokens": best["utility_per_1k_tokens"],
+                "coverage_per_1k_tokens": best["coverage_per_1k_tokens"],
             },
             "deepest_point": {
                 "k": knee["k"],
-                "answer_in_context": knee["answer_in_context"],
+                "answer_coverage": knee["answer_coverage"],
                 "context_tokens_per_probe": knee["context_tokens_per_probe"],
-                "pct_of_ceiling_accuracy": (
-                    round(100.0 * knee["answer_in_context"]
-                          / full_row["answer_in_context"], 1)
-                    if full_row["answer_in_context"] else None),
+                "pct_of_ceiling_coverage": (
+                    round(100.0 * knee["answer_coverage"]
+                          / full_row["answer_coverage"], 1)
+                    if full_row["answer_coverage"] else None),
                 "token_savings_vs_full_pct": round(100.0 * token_savings, 2),
             },
             "cost_ratio_full_over_deepest": (
@@ -213,6 +214,9 @@ def _main(argv: list[str] | None = None) -> int:
         "full_context_tokens_ref_source": "Mem0 arXiv:2504.19413 (~26k tok/conv)",
         "input_price_per_1m_usd": args.input_price_per_1m,
         "retrieval_cost_usd": 0.0,
+        "metric_notice": (
+            "answer_coverage is deterministic lexical coverage, not answer accuracy"
+        ),
         "git_commit": _git_commit(),
         "python": platform.python_version(),
         "platform": platform.platform(),
@@ -222,24 +226,24 @@ def _main(argv: list[str] | None = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2))
 
-    h = result["headline"]
+    h = result["summary"]
     print("\n=== efficiency frontier ===")
-    print(f"{'k':>3} {'acc':>7} {'tokens':>7} {'util/1k':>8} "
+    print(f"{'k':>3} {'cover':>7} {'tokens':>7} {'cov/1k':>8} "
           f"{'%full-tok':>9} {'$/1k-q':>9} {'p50ms':>6}")
     for r in result["frontier"]:
-        print(f"{r['k']:>3} {r['answer_in_context']:>7.4f} "
+        print(f"{r['k']:>3} {r['answer_coverage']:>7.4f} "
               f"{r['context_tokens_per_probe']:>7} "
-              f"{r['utility_per_1k_tokens']:>8.4f} "
+              f"{r['coverage_per_1k_tokens']:>8.4f} "
               f"{r['pct_of_full_context_tokens']:>8.3f}% "
               f"{r['cost_per_1k_questions_usd']:>9.5f} "
               f"{r['search_p50_ms']:>6}")
     fb = result["full_context_baseline"]
-    print(f"full {fb['answer_in_context']:>7.4f} "
+    print(f"full {fb['answer_coverage']:>7.4f} "
           f"{fb['context_tokens_per_probe']:>7} "
           f"{'—':>8} {'100.000':>8}% {fb['cost_per_1k_questions_usd']:>9.5f}")
     d = h["deepest_point"]
-    print(f"\nnorm-break: k={d['k']} reaches {d['pct_of_ceiling_accuracy']}% of "
-          f"full-context accuracy on {d['token_savings_vs_full_pct']}% fewer "
+    print(f"\nk={d['k']} reaches {d['pct_of_ceiling_coverage']}% of "
+          f"full-context lexical coverage on {d['token_savings_vs_full_pct']}% fewer "
           f"tokens; full context costs {h['cost_ratio_full_over_deepest']}× "
           f"more per 1k questions.")
     print(f"[frontier] full report: {out}")

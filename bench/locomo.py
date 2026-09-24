@@ -17,7 +17,7 @@ the one-liner download.
 
 Tracks reported per run (all in the output JSON):
 
-  * answer-in-context / answer accuracy by category and overall, with
+  * deterministic answer-coverage by category and overall, with
     adversarial (category 5) excluded from the headline score in
     retrieval-only mode (there is no model to abstain) and judged via
     abstention-phrase detection in --llm-grounded mode;
@@ -423,21 +423,52 @@ def _openai_judge(question: str, expected: str, actual: str,
     return (resp.choices[0].message.content or "").strip().upper().startswith("YES")
 
 
-def _substring_judge(question: str, expected: str, actual: str) -> bool:
-    """Fallback judge: case-insensitive substring / any-token overlap.
+_ANSWER_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "been", "by", "for",
+    "from", "had", "has", "have", "he", "her", "his", "in", "is", "it",
+    "of", "on", "or", "she", "that", "the", "their", "they", "to", "was",
+    "were", "with",
+}
 
-    Used when no LLM judge is available. Pass if the expected answer
-    (or any of its >=4-char tokens) appears in the actual response.
-    Permissive on purpose — this is a lower bound, not the final score.
+
+def _normalized_words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").casefold())
+
+
+def _answer_coverage_judge(question: str, expected: str, actual: str) -> bool:
+    """Deterministic lexical answer-coverage check.
+
+    This is deliberately *not* called accuracy: it cannot recognize arbitrary
+    paraphrases or factual contradictions. A normalized full expected phrase
+    passes. Otherwise, single-token answers require a whole-word match and
+    multi-token answers require at least two content tokens and 60% coverage.
+    The old any-one-token rule let a single four-character overlap pass.
     """
-    if not actual:
+    del question
+    expected_words = _normalized_words(expected)
+    actual_words = _normalized_words(actual)
+    if not expected_words or not actual_words:
         return False
-    lo_actual = actual.lower()
-    lo_expected = expected.strip().lower()
-    if lo_expected and lo_expected in lo_actual:
+
+    expected_width = len(expected_words)
+    if any(
+        actual_words[index : index + expected_width] == expected_words
+        for index in range(len(actual_words) - expected_width + 1)
+    ):
         return True
-    tokens = [t for t in re.findall(r"[a-zA-Z0-9]{4,}", lo_expected)]
-    return any(t in lo_actual for t in tokens)
+
+    expected_content = [
+        token for token in expected_words if token not in _ANSWER_STOPWORDS
+    ]
+    if not expected_content:
+        expected_content = expected_words
+    actual_set = set(actual_words)
+    if len(expected_content) == 1:
+        return expected_content[0] in actual_set
+
+    matched = sum(1 for token in set(expected_content) if token in actual_set)
+    unique_expected = len(set(expected_content))
+    return matched >= 2 and matched / unique_expected >= 0.60
 
 
 _ABSTAIN_RE = re.compile(
@@ -481,7 +512,7 @@ def run(
     samples: list[dict[str, Any]],
     *,
     max_questions_per_sample: int | None = None,
-    judge: str = "substring",
+    judge: str = "answer_coverage",
     judge_model: str = "gpt-4o-mini",
     llm_grounded: bool = False,
     on_progress: Callable[[int, int, dict[str, Any]], None] | None = None,
@@ -489,9 +520,8 @@ def run(
     """Ingest each sample, then probe with its QA and judge responses.
 
     Scoring protocol:
-      * categories 1-4: judge(expected answer, response). Headline
-        `score` is computed over these 1,540 questions — matching how
-        published LOCOMO evals (e.g. mem0's) report theirs.
+      * categories 1-4: judge(expected answer, response). The deterministic
+        default is lexical answer coverage, not semantic answer accuracy.
       * category 5 (adversarial, 446 questions): scored only when an
         LLM produces the answer (`--llm-grounded`), via abstention
         detection; reported as a separate `adversarial` block, plus
@@ -546,7 +576,7 @@ def run(
                     passed = False
                     actual += f" [judge error: {e}]"
             else:
-                passed = _substring_judge(question, expected, actual)
+                passed = _answer_coverage_judge(question, expected, actual)
 
             # Evidence recall (judge-free; only when the substrate
             # reports which dia_ids it retrieved).
@@ -624,10 +654,18 @@ def run(
     ctx_tokens = [r["context_tokens_est"] for r in per_question]
 
     ing = ingest_stats
+    coverage_rate = round(passed / total, 4) if total else 0.0
     return {
-        "score": round(passed / total, 4) if total else 0.0,
-        "passed": passed,
-        "total": total,
+        "answer_coverage": {
+            "rate": coverage_rate,
+            "passed": passed,
+            "total": total,
+            "metric": (
+                "openai_llm_judge" if judge == "openai"
+                else "deterministic_lexical_coverage"
+            ),
+            "is_answer_accuracy": False,
+        },
         "adversarial": {
             "total": len(adversarial_rows),
             "scored": len(adv_scored),
@@ -638,11 +676,12 @@ def run(
                      else "not scored: retrieval-only mode has no model "
                           "to abstain; excluded from headline score"),
         },
-        "score_with_adversarial": (round(all_passed / all_scored, 4)
-                                   if all_scored else 0.0),
+        "answer_coverage_with_adversarial": (
+            round(all_passed / all_scored, 4) if all_scored else 0.0
+        ),
         "samples_run": ing["samples"],
         "by_category": {
-            c: {**v, "score": round(v["passed"] / v["total"], 4)
+            c: {**v, "coverage_rate": round(v["passed"] / v["total"], 4)
                 if v["total"] else 0.0}
             for c, v in sorted(by_category.items())
         },
@@ -729,10 +768,10 @@ def _main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-questions-per-sample", type=int, default=None,
                    help="cap QA count per sample (smoke tests); "
                         "samples have ~199 QA each")
-    p.add_argument("--judge", choices=("substring", "openai"),
-                   default="substring",
-                   help="answer-scoring method. `substring` = fast "
-                        "substring/token match (lower bound). `openai` "
+    p.add_argument("--judge", choices=("answer_coverage", "openai"),
+                   default="answer_coverage",
+                   help="answer-scoring method. `answer_coverage` = "
+                        "deterministic lexical coverage (not accuracy). `openai` "
                         "= LLM-as-judge via OPENAI_API_KEY (paid; more "
                         "representative of LOCOMO-style grading).")
     p.add_argument("--judge-model", default="gpt-4o-mini")
