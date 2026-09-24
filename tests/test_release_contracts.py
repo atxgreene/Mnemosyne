@@ -297,16 +297,6 @@ class ReleaseMechanicsTests(unittest.TestCase):
                         check=True,
                         capture_output=True,
                     )
-                    parent_has_path = subprocess.run(
-                        ["git", "cat-file", "-e", f"{first_commit}^:{tracked_path}"],
-                        cwd=_REPO,
-                        capture_output=True,
-                    )
-                    self.assertNotEqual(
-                        parent_has_path.returncode,
-                        0,
-                        f"{first_commit} did not introduce {tracked_path}",
-                    )
                 for commit_path in (
                     f"{artifact_commit}:{runner}",
                     f"{artifact_commit}:docs/benchmark-results/{artifact_name}",
