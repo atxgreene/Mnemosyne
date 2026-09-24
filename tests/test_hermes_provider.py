@@ -9,11 +9,12 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
@@ -66,7 +67,7 @@ class ProviderTestCase(unittest.TestCase):
         self.assertTrue(all("key" in field for field in schema))
         self.assertTrue(all("name" not in field for field in schema))
 
-    def test_tool_schema_and_handler_both_block_identity_l5(self):
+    def test_tool_schema_and_handler_reserve_l0_l1_and_l5(self):
         provider = self.make_provider()
         write_schema = next(
             schema
@@ -74,20 +75,22 @@ class ProviderTestCase(unittest.TestCase):
             if schema["name"] == "memory_write"
         )
         properties = write_schema["parameters"]["properties"]
+        self.assertEqual(properties["tier"]["minimum"], 2)
         self.assertEqual(properties["tier"]["maximum"], 4)
         self.assertNotIn("identity", properties["kind"]["enum"])
 
-        by_tier = self.parsed(
-            provider,
-            "memory_write",
-            {"content": "model asserted identity", "kind": "fact", "tier": 5},
-        )
+        for tier in (0, 1, 5):
+            by_tier = self.parsed(
+                provider,
+                "memory_write",
+                {"content": "reserved-tier mutation", "kind": "fact", "tier": tier},
+            )
+            self.assertIn(f"L{tier}", by_tier["error"])
         by_kind = self.parsed(
             provider,
             "memory_write",
-            {"content": "model asserted identity", "kind": "identity", "tier": 4},
+            {"content": "identity mutation", "kind": "identity", "tier": 4},
         )
-        self.assertIn("L5", by_tier["error"])
         self.assertIn("identity", by_kind["error"])
         self.assertEqual(provider._store.stats()["total"], 0)
 
@@ -112,12 +115,12 @@ class ProviderTestCase(unittest.TestCase):
         stored = self.parsed(
             provider,
             "memory_write",
-            {"content": "Austin prefers Python", "kind": "preference", "tier": 3},
+            {"content": "The operator prefers Python", "kind": "preference", "tier": 3},
             session_id="tool-session",
         )
         self.assertTrue(stored["stored"])
         found = self.parsed(
-            provider, "memory_search", {"query": "Austin Python", "limit": 5}
+            provider, "memory_search", {"query": "operator Python", "limit": 5}
         )
         self.assertEqual(found["count"], 1)
         self.assertIn("Python", found["results"][0]["content"])
@@ -195,6 +198,85 @@ class ProviderTestCase(unittest.TestCase):
         finally:
             worker.stop()
 
+    def test_worker_stop_drains_and_rejects_late_submissions(self):
+        worker = _WriteWorker()
+        accepted = []
+        for index in range(20):
+            worker.submit(accepted.append, index)
+        worker.stop()
+        self.assertEqual(accepted, list(range(20)))
+        self.assertFalse(worker.is_alive)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            worker.submit(lambda: None)
+
+    def test_worker_submit_stop_race_executes_every_accepted_job(self):
+        worker = _WriteWorker()
+        start = threading.Barrier(5)
+        accepted = []
+        executed = []
+        records_lock = threading.Lock()
+
+        def record(value):
+            with records_lock:
+                executed.append(value)
+
+        def submitter(group):
+            start.wait()
+            for index in range(100):
+                value = (group, index)
+                try:
+                    worker.submit(record, value)
+                except RuntimeError:
+                    return
+                with records_lock:
+                    accepted.append(value)
+
+        submitters = [threading.Thread(target=submitter, args=(group,)) for group in range(4)]
+        for thread in submitters:
+            thread.start()
+        start.wait()
+        worker.stop()
+        for thread in submitters:
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+
+        self.assertFalse(worker.is_alive)
+        self.assertCountEqual(executed, accepted)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            worker.submit(record, ("late", 0))
+
+    def test_shutdown_waits_for_worker_before_closing_store(self):
+        started = threading.Event()
+        release = threading.Event()
+        closed = threading.Event()
+
+        class Store:
+            path = Path(self.tmp.name) / "race.db"
+
+            def close(inner_self):
+                closed.set()
+
+        provider = MnemosyneMemoryProvider()
+        provider._store = Store()
+        provider._db_path = Store.path
+        provider._worker = _WriteWorker()
+
+        def blocked_job():
+            started.set()
+            self.assertTrue(release.wait(timeout=5))
+
+        provider._worker.submit(blocked_job)
+        self.assertTrue(started.wait(timeout=2))
+        closer = threading.Thread(target=provider.shutdown)
+        closer.start()
+        closer.join(timeout=0.1)
+        self.assertTrue(closer.is_alive())
+        self.assertFalse(closed.is_set())
+        release.set()
+        closer.join(timeout=2)
+        self.assertFalse(closer.is_alive())
+        self.assertTrue(closed.is_set())
+
     def test_config_save_merges_atomically_with_private_permissions(self):
         provider = MnemosyneMemoryProvider()
         provider.save_config({"db_path": "first.db", "prefetch_limit": 3}, str(self.home))
@@ -230,6 +312,46 @@ class ProviderTestCase(unittest.TestCase):
             self.assertEqual(
                 connection.execute("SELECT COUNT(*) FROM memories").fetchone()[0], 1
             )
+
+    def test_relative_db_paths_are_profile_isolated_and_private(self):
+        homes = [Path(self.tmp.name) / "profile-a", Path(self.tmp.name) / "profile-b"]
+        db_paths = []
+        for index, home in enumerate(homes):
+            home.mkdir()
+            (home / "mnemosyne.json").write_text(
+                json.dumps({"db_path": "state/memory.db"}), encoding="utf-8"
+            )
+            provider = MnemosyneMemoryProvider()
+            provider.initialize(
+                f"profile-{index}", hermes_home=str(home), agent_context="primary"
+            )
+            self.parsed(
+                provider,
+                "memory_write",
+                {"content": f"profile marker {index}", "kind": "fact", "tier": 2},
+            )
+            db_path = Path(provider._store.path)
+            db_paths.append(db_path)
+            self.assertEqual(db_path, (home / "state" / "memory.db").resolve())
+            self.assertEqual(db_path.parent.stat().st_mode & 0o777, 0o700)
+            for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+                if path.exists():
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600, path)
+            provider.shutdown()
+
+        self.assertNotEqual(db_paths[0], db_paths[1])
+        for index, db_path in enumerate(db_paths):
+            with sqlite3.connect(db_path) as connection:
+                rows = connection.execute("SELECT content FROM memories").fetchall()
+            self.assertEqual(rows, [(f"profile marker {index}",)])
+
+    def test_relative_db_path_rejects_parent_traversal(self):
+        (self.home / "mnemosyne.json").write_text(
+            json.dumps({"db_path": "../outside.db"}), encoding="utf-8"
+        )
+        provider = MnemosyneMemoryProvider()
+        with self.assertRaisesRegex(ValueError, "inside the active HERMES_HOME"):
+            provider.initialize("traversal", hermes_home=str(self.home))
 
 
 if __name__ == "__main__":

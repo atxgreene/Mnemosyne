@@ -35,18 +35,18 @@ class AnswerCoverageJudgeTests(unittest.TestCase):
     def test_one_four_character_overlap_does_not_pass(self):
         self.assertFalse(
             _answer_coverage_judge(
-                "Where does Alice live?",
-                "Alice lives in Cedar Park",
-                "Bob visited a park near Dallas.",
+                "Where does Person A live?",
+                "Person A lives in Northport",
+                "Person B visited a park near Southport.",
             )
         )
 
     def test_shared_entity_without_answer_does_not_pass(self):
         self.assertFalse(
             _answer_coverage_judge(
-                "What did Priya buy in Berlin?",
-                "Priya bought a blue bicycle",
-                "Priya discussed Berlin and ordered coffee.",
+                "What did Person C buy in Metro City?",
+                "Person C bought a blue bicycle",
+                "Person C discussed Metro City and ordered coffee.",
             )
         )
 
@@ -90,9 +90,33 @@ class SanitizerTests(unittest.TestCase):
         self.assertTrue(provenance["per_question_records_omitted"])
         assert_aggregate_only(sanitized)
 
-    def test_validator_rejects_nested_dataset_text_keys(self):
+    def test_validator_requires_provenance(self):
         with self.assertRaises(ValueError):
-            assert_aggregate_only({"summary": {"question": "leak"}})
+            assert_aggregate_only({"answer_coverage": {"rate": 1.0}})
+
+    def test_sanitizer_rejects_alternate_private_text_key(self):
+        raw = {
+            "answer_coverage": {"rate": 1.0, "passed": 1, "total": 1},
+            "prompt_body": "private dataset question under an alternate key",
+            "_metadata": {"dataset_sha256": "c" * 64},
+        }
+        with self.assertRaisesRegex(ValueError, "outside aggregate schema"):
+            sanitize_report(raw, source_bytes=b"{}", source_name="raw.json")
+
+    def test_validator_rejects_unexpected_nested_array_or_object(self):
+        raw = {
+            "answer_coverage": {"rate": 1.0, "passed": 1, "total": 1},
+            "_metadata": {"dataset_sha256": "d" * 64},
+        }
+        sanitized = sanitize_report(raw, source_bytes=b"{}", source_name="raw.json")
+        for mutation in (
+            {"dialogue_records": [{"utterance": "private text"}]},
+            {"private_payload": {"body": "private text"}},
+        ):
+            candidate = json.loads(json.dumps(sanitized))
+            candidate["_metadata"].update(mutation)
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                assert_aggregate_only(candidate)
 
     def test_sanitizer_cli_shape_round_trip(self):
         raw = {

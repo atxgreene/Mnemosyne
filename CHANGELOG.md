@@ -12,8 +12,9 @@ All notable changes to the Mnemosyne harness deployment repo. The format is loos
   handling, context-preserving background work, dynamic module resolution,
   atomic config writes, and failure logging with the installed v0.21.4
   contract.
-- Restricted model-callable writes to L0-L4 and non-identity kinds in both
-  schema and handler while preserving direct trusted `MemoryStore` L5 writes.
+- Restricted model-callable writes to L2-L4 and non-identity kinds in both
+  schema and handler while preserving trusted lifecycle ownership of L0/L1 and
+  direct trusted `MemoryStore` L5 writes.
 - Added standalone provider tests and a real-Hermes compatibility test using a
   temporary isolated `HERMES_HOME`.
 

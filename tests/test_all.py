@@ -86,8 +86,11 @@ def _tmp_projects_dir() -> Path:
 
 @test("redact: flat dict with token key")
 def _():
-    out = ht._redact({"token": "secret_abc", "name": "alice"}, ht.DEFAULT_REDACT_PATTERNS)
-    assert out == {"token": ht.REDACTED, "name": "alice"}, out
+    out = ht._redact(
+        {"token": "secret_abc", "name": "synthetic-subject"},
+        ht.DEFAULT_REDACT_PATTERNS,
+    )
+    assert out == {"token": ht.REDACTED, "name": "synthetic-subject"}, out
 
 
 @test("redact: nested dict redacts at any depth")

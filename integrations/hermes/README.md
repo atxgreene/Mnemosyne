@@ -6,13 +6,14 @@ v0.21.4. It stores data locally in SQLite and adds no runtime dependency.
 ## Security boundary
 
 The model-callable `memory_write` tool accepts `fact`, `preference`, `goal`, and
-`pattern` in tiers L0-L4. It rejects L5 and identity writes in both the JSON
-schema and the handler. Trusted application code can still write L5 through
+`pattern` in tiers L2-L4. It rejects L0 instinct, L1 working-memory, L5, and
+identity writes in both the JSON schema and the handler. Trusted application code can still write L5 through
 `mnemosyne_memory.MemoryStore` for reviewed identity workflows.
 
-Automatic turn/extraction writes run only when Hermes initializes the provider
-with `agent_context="primary"`. Explicit tool calls remain available in other
-contexts, subject to the L0-L4 restriction.
+Automatic turn writes run only when Hermes initializes the provider with
+`agent_context="primary"`. Explicit tool calls remain available in other
+contexts, subject to the L2-L4 restriction. No standalone session-extraction
+capability is claimed by the public package.
 
 ## Install
 
@@ -55,7 +56,7 @@ when the platform permits it.
 | Tool | Contract |
 |---|---|
 | `memory_search(query, limit=8)` | Search all tiers; returns a JSON object. |
-| `memory_write(content, kind, tier)` | Explicit L0-L4 write; identity/L5 rejected. |
+| `memory_write(content, kind, tier)` | Explicit L2-L4 write; L0/L1 and identity/L5 rejected. |
 | `memory_stats()` | Tier/kind counts in a JSON object. |
 
 All handler paths, including validation errors and unknown tools, return JSON

@@ -353,7 +353,7 @@
       <div class="stat">
         <span class="num green" data-count="8" data-suffix="/8">0/8</span>
         <div class="label">Hermes runtime checks PASS</div>
-        <div class="sub">Live Hermes v0.16.0 — discovery, routing, persistence, fresh-session recall.</div>
+        <div class="sub">Hermes v0.21.4 — discovery, loading, routing, persistence, and clean shutdown.</div>
       </div>
       <div class="stat">
         <span class="num teal" data-count="0.8704" data-dec="4">0.0000</span>
@@ -361,9 +361,9 @@
         <div class="sub">Deterministic probe set — recall@5 / MRR / hit@1 by category.</div>
       </div>
       <div class="stat">
-        <span class="num gold" data-count="0.6247" data-dec="4">0.0000</span>
-        <div class="label">LOCOMO retrieval track</div>
-        <div class="sub"><b>1,540</b> scored questions · 2.2–2.5× recency/random baselines · snap-research/locomo.</div>
+        <span class="num gold" data-count="0.5009" data-dec="4">0.0000</span>
+        <div class="label">LOCOMO evidence recall@8</div>
+        <div class="sub"><b>1,536</b> questions with gold dialogue IDs · judge-free retrieval metric · snap-research/locomo.</div>
       </div>
       <div class="stat">
         <span class="num teal" data-count="0.96" data-dec="2">0.00</span>
@@ -405,15 +405,15 @@
 
     <div class="hermes-grid">
       <div class="terminal" id="hermesTerm">
-        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">hermes · v0.16.0 · runtime validation</span></div>
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">hermes · v0.21.4 · runtime validation</span></div>
         <div class="term-body" id="termBody"></div>
       </div>
       <div class="hermes-copy">
         <h3>Three tools. Zero ceremony.</h3>
-        <p>Turns persist automatically through a single-writer SQLite queue — the agent loop is never blocked. Session-end hooks run salient extraction, writing facts, preferences, and goals up-tier.</p>
+        <p>Primary-context turns persist automatically through a single-writer SQLite queue. Explicit model writes are constrained to non-identity memory in tiers L2–L4.</p>
         <table class="tool-table">
           <tr><td>memory_search(query, limit)</td><td>FTS5 BM25 + strength-weighted retrieval across all tiers</td></tr>
-          <tr><td>memory_write(content, kind, tier)</td><td>store fact / preference / goal / pattern at tier 2–5</td></tr>
+          <tr><td>memory_write(content, kind, tier)</td><td>store fact / preference / goal / pattern in tiers L2–L4</td></tr>
           <tr><td>memory_stats()</td><td>direct SQLite per-tier row counts</td></tr>
         </table>
         <div class="badge-row">
@@ -672,7 +672,7 @@ document.querySelectorAll('.stat .num[data-count]').forEach(el=>co.observe(el));
     {t:'<span class="term-check">  shutdown / queue flush       </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-check">  fresh-session recall         </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-dim">&nbsp;</span>',d:160},
-    {t:'<span class="term-pass">  ✓ 8/8 checks passed</span> <span class="term-dim">— live Hermes v0.16.0</span>',d:300},
+    {t:'<span class="term-pass">  ✓ 8/8 checks passed</span> <span class="term-dim">— Hermes v0.21.4</span>',d:300},
   ];
   let started=false;
   function run(){

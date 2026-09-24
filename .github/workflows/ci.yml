@@ -9,13 +9,16 @@ on:
     - cron: "0 12 * * 1"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   HERMES_AGENT_REPOSITORY: https://github.com/NousResearch/hermes-agent.git
-  # Installed local v0.21.4 compatibility reference used for this release.
+  # Verified from the v0.21.4 pyproject and checked out immutably.
   HERMES_AGENT_V0214_COMMIT: d3b25b52ad1318c526bdb259b600eeca3d5f38e6
 
 jobs:
@@ -23,22 +26,18 @@ jobs:
     name: syntax, pyflakes, and public claims
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
       - run: python3 -m compileall -q .
       - run: |
-          python3 -m pip install --quiet pyflakes
+          python3 -m pip install --quiet "pyflakes==3.4.0"
           python3 -m pyflakes \
-            *.py examples/*.py tests/*.py bench/*.py integrations/*.py \
-            integrations/hermes/*.py
-      - name: No current bare-PyPI install claim
-        run: |
-          if git grep -nE 'pip(3)? install mnemosyne-harness|pipx install mnemosyne-harness' -- ':!.github/workflows/ci.yml'; then
-            echo "Mnemosyne has no PyPI project; use GitHub release/source-tag instructions" >&2
-            exit 1
-          fi
+            ./*.py ./examples/*.py ./tests/*.py ./bench/*.py ./integrations/*.py \
+            ./integrations/hermes/*.py
+      - name: Enforce current public and release claims
+        run: python3 tests/test_release_contracts.py
 
   unit:
     name: unit tests (Python ${{ matrix.python }})
@@ -49,8 +48,8 @@ jobs:
       matrix:
         python: ["3.9", "3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python }}
       - run: python3 tests/test_all.py
@@ -60,39 +59,84 @@ jobs:
     runs-on: ubuntu-latest
     needs: verify
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - run: python3 integrations/hermes/test_provider.py
+      - run: python3 tests/test_hermes_provider.py
 
   hermes-v0214:
-    name: Hermes Agent v0.21.4 compatibility
+    name: wheel discovery/load on Hermes Agent v0.21.4
     runs-on: ubuntu-latest
     needs: provider
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
       - name: Checkout immutable Hermes compatibility reference
         run: |
-          git clone --filter=blob:none "$HERMES_AGENT_REPOSITORY" /tmp/hermes-agent
-          git -C /tmp/hermes-agent checkout --detach "$HERMES_AGENT_V0214_COMMIT"
-      - name: Install Hermes runtime dependencies
-        run: python3 -m pip install --quiet -e /tmp/hermes-agent
-      - name: Exercise real ABC and MemoryManager with isolated HERMES_HOME
+          git init --quiet /tmp/hermes-agent
+          git -C /tmp/hermes-agent remote add origin "$HERMES_AGENT_REPOSITORY"
+          git -C /tmp/hermes-agent fetch --depth=1 origin "$HERMES_AGENT_V0214_COMMIT"
+          git -C /tmp/hermes-agent checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/hermes-agent rev-parse HEAD)" = "$HERMES_AGENT_V0214_COMMIT"
+          python3 - <<'PY'
+          import tomllib
+          with open('/tmp/hermes-agent/pyproject.toml', 'rb') as handle:
+              assert tomllib.load(handle)['project']['version'] == '0.21.4'
+          PY
+      - name: Build wheel and install it with exact Hermes
         run: |
-          python3 integrations/hermes/test_hermes_compat.py \
-            --hermes-root /tmp/hermes-agent
+          python3 -m pip install --quiet "build==1.3.0"
+          rm -rf -- build dist ./*.egg-info
+          python3 -m build --wheel
+          python3 -m venv /tmp/mnemosyne-hermes-wheel
+          /tmp/mnemosyne-hermes-wheel/bin/python -m pip install --quiet \
+            -e /tmp/hermes-agent ./dist/*.whl
+      - name: Discover and load installed wheel through Hermes
+        env:
+          HERMES_HOME: /tmp/mnemosyne-hermes-home
+          MNEMOSYNE_PATH: ""
+        run: |
+          mkdir -p "$HERMES_HOME"
+          cd /tmp
+          /tmp/mnemosyne-hermes-wheel/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import hermes_cli
+          from plugins.memory import list_memory_provider_names, load_memory_provider
+
+          assert hermes_cli.__version__ == "0.21.4", hermes_cli.__version__
+          assert "mnemosyne" in list_memory_provider_names()
+          provider = load_memory_provider("mnemosyne", register_skills=False)
+          assert provider is not None
+          assert provider.name == "mnemosyne"
+          assert provider.__class__.__module__.startswith("_hermes_user_memory.")
+          provider.initialize(
+              "wheel-discovery-session",
+              hermes_home=str(Path("/tmp/mnemosyne-hermes-home")),
+              platform="cli",
+              agent_context="primary",
+          )
+          try:
+              stored = json.loads(provider.handle_tool_call(
+                  "memory_write",
+                  {"content": "synthetic wheel discovery marker", "kind": "fact", "tier": 2},
+              ))
+              assert stored["stored"] is True, stored
+          finally:
+              provider.shutdown()
+          print("Hermes 0.21.4 discovered and loaded the installed Mnemosyne wheel")
+          PY
 
   benchmark:
     name: benchmark regressions and sanitized artifacts
     runs-on: ubuntu-latest
     needs: verify
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
       - run: python3 bench/test_benchmark.py
@@ -117,40 +161,41 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
       - run: /bin/bash test-harness.sh
+      - run: /bin/bash install-mnemosyne.sh --self-test-portable-edit
 
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
-      - run: shellcheck -x *.sh
+      - run: shellcheck -x ./*.sh
 
   package:
     name: build, twine, wheel install, and provider entry point
     runs-on: ubuntu-latest
     needs: [unit, provider, hermes-v0214, benchmark, harness, shellcheck]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
       - name: Build and validate distributions
         run: |
-          python3 -m pip install --quiet build twine
-          rm -rf build dist *.egg-info
+          python3 -m pip install --quiet "build==1.3.0" "twine==6.2.0"
+          rm -rf -- build dist ./*.egg-info
           python3 -m build
-          python3 -m twine check dist/*
+          python3 -m twine check ./dist/*
       - name: Install wheel into a clean environment
         run: |
           python3 -m venv /tmp/mnemosyne-wheel
-          /tmp/mnemosyne-wheel/bin/python -m pip install --quiet dist/*.whl
-      - name: Validate metadata, resources, and Hermes provider entry point
+          /tmp/mnemosyne-wheel/bin/python -m pip install --quiet ./dist/*.whl
+      - name: Validate metadata, resources, and provider entry point
         run: |
           cd /tmp
           /tmp/mnemosyne-wheel/bin/python - <<'PY'
@@ -186,6 +231,11 @@ jobs:
           }
           missing = sorted(required - names)
           assert not missing, missing
+          assert not any("test_" in name for name in names), sorted(names)
+          integration_paths = {
+              name for name in names if name.startswith("integrations/")
+          }
+          assert integration_paths <= required | {"integrations/__init__.py"}, integration_paths
           assert any(name.endswith("share/mnemosyne/scenarios.example.jsonl") for name in names)
           print(f"wheel contents OK: {wheel.name}")
           PY

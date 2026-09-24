@@ -37,6 +37,28 @@
 
 set -euo pipefail
 
+patch_disco_build_backend() {
+  local pyproject="$1"
+  # `sed -i` has incompatible GNU/BSD argument parsing.  The attached backup
+  # suffix form is accepted by both implementations and also preserves the
+  # original file for operators of this retired installer.
+  sed -i.bak \
+    's|setuptools\.backends\._legacy:_Backend|setuptools.build_meta|' \
+    "$pyproject"
+}
+
+if [ "${1:-}" = "--self-test-portable-edit" ]; then
+  test_dir=$(mktemp -d "${TMPDIR:-/tmp}/mnemosyne-sed-test.XXXXXX")
+  trap 'rm -rf "$test_dir"' EXIT
+  test_file="$test_dir/pyproject.toml"
+  printf '%s\n' 'build-backend = "setuptools.backends._legacy:_Backend"' > "$test_file"
+  patch_disco_build_backend "$test_file"
+  grep -q 'setuptools\.build_meta' "$test_file"
+  grep -q 'setuptools\.backends\._legacy:_Backend' "$test_file.bak"
+  printf '%s\n' "portable edit self-test passed"
+  exit 0
+fi
+
 if [ "${1:-}" != "--legacy-multi-repo" ]; then
   printf '%s\n' \
     "RETIRED: install-mnemosyne.sh provisions the pre-v0.2 multi-repo stack." \
@@ -146,8 +168,7 @@ clone_or_pull "$FANTASTIC_REPO" "$PROJECTS_DIR/fantastic-disco" "$FANTASTIC_BRAN
 DISCO_PYPROJECT="$PROJECTS_DIR/fantastic-disco/pyproject.toml"
 if [ -f "$DISCO_PYPROJECT" ] && grep -q 'setuptools\.backends\._legacy:_Backend' "$DISCO_PYPROJECT"; then
   warn "Patching fantastic-disco/pyproject.toml build-backend (upstream bug)"
-  cp "$DISCO_PYPROJECT" "$DISCO_PYPROJECT.bak"
-  sed -i 's|setuptools\.backends\._legacy:_Backend|setuptools.build_meta|' "$DISCO_PYPROJECT"
+  patch_disco_build_backend "$DISCO_PYPROJECT"
   ok "build-backend patched -> setuptools.build_meta"
 fi
 

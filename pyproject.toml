@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77.0"]
+requires = ["setuptools==80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -107,6 +107,12 @@ mnemosyne = "integrations.hermes:register"
 # This matches the project's philosophy of being immediately readable/
 # hackable without a build step. `pip install -e .` still creates proper
 # console entry points via the [project.scripts] table above.
+packages = [
+    "mnemosyne_ui",
+    "mnemosyne_ui.static",
+    "integrations",
+    "integrations.hermes",
+]
 py-modules = [
     "mnemosyne_config",
     "harness_telemetry",
@@ -177,11 +183,8 @@ py-modules = [
     "mnemosyne_instinct",
 ]
 
-# mnemosyne_ui is a real package (has __init__.py) so its static
-# assets can ship as package_data. The flat-layout py-modules above
-# can't carry data files; only packages can.
-[tool.setuptools.packages.find]
-include = ["mnemosyne_ui*", "integrations*"]
+# Packages are listed explicitly above so unrelated future integrations and
+# in-package test modules cannot enter the public wheel through broad discovery.
 
 [tool.setuptools.package-data]
 mnemosyne_ui = [

@@ -48,8 +48,9 @@ need `mnemosyne_path`; use it only to point at a specific source checkout.
 ## Model-callable boundary
 
 `memory_write` permits these kinds: `fact`, `preference`, `goal`, `pattern`.
-It permits tiers L0-L4. Both the advertised JSON schema and runtime handler
-reject identity kinds and L5.
+It permits tiers L2-L4. Both the advertised JSON schema and runtime handler
+reserve L0 instinct, L1 working memory, and L5 identity for trusted lifecycle
+code rather than model tool calls.
 
 This does not remove L5 from Mnemosyne. Trusted application code and reviewed
 human workflows may write L5 directly through `MemoryStore`. The adapter is the
@@ -61,7 +62,8 @@ security boundary for model-callable tools.
 - All tool results are JSON-object strings.
 - `sync_turn` accepts `session_id`, `messages`, and `turn_author`.
 - Background work preserves submitter context and logs failures.
-- Automatic turn/extraction writes are restricted to primary agent context.
+- Automatic turn writes are restricted to primary agent context; this public
+  package does not claim a standalone session-extraction layer.
 - Session switching changes the default write source and clears both cached and
   in-flight old-session prefetch results.
 - Configured checkouts and installed modules are resolved dynamically.

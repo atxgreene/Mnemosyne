@@ -41,6 +41,16 @@ The artifact is aggregate-only. It includes source and dataset SHA-256
 provenance but no dataset questions, expected answers, generated responses, or
 per-question rows.
 
+Git provenance uses distinct fields rather than treating the checkout at run
+time as if it already contained the later artifact:
+
+- execution source parent: `b73d1c8e4e3a3d77d0d2985027298fc838b5c5c5`;
+- first commit containing this measured artifact: `c68949401983dc0f888f3a05019a9acd4eab5447`;
+- first repository commit containing `bench/locomo.py` in the imported history:
+  `e6a1db7f76bc8ff8e5e90e28089bc27163cbf460`;
+- historical reproduction checkout: `c68949401983dc0f888f3a05019a9acd4eab5447`,
+  which contains both the artifact and its measured runner revision.
+
 ## Reproduce with the current judge
 
 Mnemosyne does not redistribute LOCOMO. Fetch it from the upstream repository:
@@ -84,9 +94,10 @@ Current `bench/locomo.py` reports:
 - ingest throughput and cost metadata;
 - per-question records in the **raw local report only**.
 
-`bench/sanitize_results.py` strips per-question and dataset-text fields, removes
-local path arguments, records the source file SHA-256, and validates the result
-as aggregate-only.
+`bench/sanitize_results.py` omits the schema-defined raw `results` array and
+local path arguments, records the source file SHA-256, and validates every
+remaining field against a closed aggregate schema. Unexpected keys, arrays, or
+objects fail closed instead of being copied into a public artifact.
 
 ## LLM-grounded answer evaluation
 
@@ -120,6 +131,12 @@ Its answer fields are explicitly prefixed `legacy_` because they used the
 retired permissive judge. Token, latency, cost-model, and judge-free evidence
 recall fields remain useful, but the legacy coverage values must not be
 presented as accuracy.
+
+The frontier executed from source parent
+`c68949401983dc0f888f3a05019a9acd4eab5447`; its runner and artifact first
+appear together in `9d23404280b49762522241c1d0705f80b55f8325`.
+Reproduce the historical artifact from the latter commit, which actually
+contains `bench/efficiency_frontier.py`.
 
 ## LongMemEval
 

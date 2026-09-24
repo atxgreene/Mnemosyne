@@ -10,23 +10,25 @@ From a clean checkout:
 
 ```sh
 python3 -m venv .release-venv
-.release-venv/bin/python -m pip install --upgrade pip build twine pyflakes
+.release-venv/bin/python -m pip install --upgrade \
+  "pip==25.2" "build==1.3.0" "twine==6.2.0" "pyflakes==3.4.0"
 .release-venv/bin/python tests/test_all.py
 /bin/bash test-harness.sh
-.release-venv/bin/python integrations/hermes/test_provider.py
+.release-venv/bin/python tests/test_hermes_provider.py
+.release-venv/bin/python tests/test_release_contracts.py
 .release-venv/bin/python bench/test_benchmark.py
 .release-venv/bin/python bench/longmemeval.py --selftest
 
-rm -rf build dist *.egg-info
+rm -rf -- build dist ./*.egg-info
 .release-venv/bin/python -m build
-.release-venv/bin/python -m twine check dist/*
+.release-venv/bin/python -m twine check ./dist/*
 ```
 
 Run the Hermes compatibility gate with Python 3.11+ and an exact Hermes Agent
 v0.21.4 checkout:
 
 ```sh
-python3 integrations/hermes/test_hermes_compat.py \
+python3 tests/test_hermes_compat.py \
   --hermes-root /path/to/hermes-agent-v0.21.4
 ```
 
@@ -34,8 +36,8 @@ python3 integrations/hermes/test_hermes_compat.py \
 
 ```sh
 python3 -m venv .wheel-venv
-.whl-venv/bin/python -m pip install dist/mnemosyne_harness-0.9.8-py3-none-any.whl
-.whl-venv/bin/python -c '
+.wheel-venv/bin/python -m pip install dist/mnemosyne_harness-0.9.8-py3-none-any.whl
+.wheel-venv/bin/python -c '
 from importlib.metadata import entry_points, version
 assert version("mnemosyne-harness") == "0.9.8"
 eps = entry_points(group="hermes_agent.memory_providers")
@@ -43,7 +45,7 @@ ep = next(ep for ep in eps if ep.name == "mnemosyne")
 assert callable(ep.load())
 print("wheel + Hermes entry point OK")
 '
-.whl-venv/bin/mnemosyne-memory --help >/dev/null
+.wheel-venv/bin/mnemosyne-memory --help >/dev/null
 ```
 
 Inspect wheel contents and confirm these are present:

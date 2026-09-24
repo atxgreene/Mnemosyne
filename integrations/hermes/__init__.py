@@ -2,7 +2,8 @@
 """Mnemosyne memory provider for Hermes Agent 0.21.4.
 
 The adapter keeps the Mnemosyne core independently usable while enforcing a
-narrower model-callable boundary: tools may write L0-L4, but never L5 identity.
+narrower model-callable boundary: tools may write L2-L4, but never L0 instinct,
+L1 working memory, or L5 identity.
 Trusted application code can still write L5 directly through ``MemoryStore``.
 """
 
@@ -114,6 +115,7 @@ except ImportError:
 
 
 _MODEL_WRITABLE_KINDS = ("fact", "preference", "goal", "pattern")
+_MODEL_MIN_TIER = 2
 _MODEL_MAX_TIER = 4
 _SENTINEL = object()
 
@@ -173,6 +175,38 @@ def _atomic_json_write(path: Path, value: Dict[str, Any]) -> None:
 
 def _load_config(hermes_home: Union[str, Path]) -> Dict[str, Any]:
     return _read_json_dict(Path(hermes_home) / "mnemosyne.json")
+
+
+def _resolve_db_path(
+    hermes_home: Union[str, Path], raw_db_path: Optional[Union[str, Path]]
+) -> Tuple[Path, bool]:
+    """Resolve a configured DB path and contain relative paths to this profile."""
+    profile_root = Path(hermes_home).expanduser().resolve()
+    if not raw_db_path:
+        return profile_root / "mnemosyne" / "memory.db", True
+
+    supplied = Path(raw_db_path).expanduser()
+    if supplied.is_absolute():
+        return supplied.resolve(), False
+
+    resolved = (profile_root / supplied).resolve()
+    try:
+        resolved.relative_to(profile_root)
+    except ValueError as exc:
+        raise ValueError(
+            "relative db_path must remain inside the active HERMES_HOME profile"
+        ) from exc
+    return resolved, True
+
+
+def _secure_sqlite_files(db_path: Path) -> None:
+    """Keep the SQLite database and live WAL sidecars owner-only."""
+    for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        try:
+            if path.exists():
+                path.chmod(0o600)
+        except OSError:
+            logger.warning("Could not set private permissions on %s", path, exc_info=True)
 
 
 def _candidate_roots(
@@ -271,6 +305,8 @@ class _WriteWorker:
 
     def __init__(self) -> None:
         self._queue: queue.Queue = queue.Queue()
+        self._state_lock = threading.Lock()
+        self._closed = False
         self._thread = spawn_context_thread(
             self._run, name="mnemosyne-write-worker", daemon=True
         )
@@ -291,16 +327,27 @@ class _WriteWorker:
 
     def submit(self, fn, *args, **kwargs) -> None:
         # Capture the context of THIS turn, not only initialize()'s context.
-        self._queue.put((ctx_bound(fn), args, kwargs))
+        with self._state_lock:
+            if self._closed:
+                raise RuntimeError("Mnemosyne writer is closed")
+            self._queue.put((ctx_bound(fn), args, kwargs))
 
     def flush(self) -> None:
         self._queue.join()
 
     def stop(self) -> None:
-        self._queue.put(_SENTINEL)
-        self._thread.join(timeout=5.0)
-        if self._thread.is_alive():
-            logger.warning("Mnemosyne writer did not stop within 5 seconds")
+        """Atomically reject new jobs, drain accepted jobs, and join the worker."""
+        with self._state_lock:
+            if not self._closed:
+                self._closed = True
+                self._queue.put(_SENTINEL)
+        if threading.current_thread() is self._thread:
+            raise RuntimeError("Mnemosyne writer cannot stop itself")
+        self._thread.join()
+
+    @property
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
 
 
 class MnemosyneMemoryProvider(MemoryProvider):
@@ -316,6 +363,8 @@ class MnemosyneMemoryProvider(MemoryProvider):
         self._prefetch_cache: Dict[str, str] = {}
         self._prefetch_generation = 0
         self._cache_lock = threading.Lock()
+        self._lifecycle_lock = threading.RLock()
+        self._db_path: Optional[Path] = None
 
     @property
     def name(self) -> str:
@@ -335,47 +384,53 @@ class MnemosyneMemoryProvider(MemoryProvider):
         )
 
     def initialize(self, session_id: str, **kwargs: Any) -> None:
-        if self._worker is not None or self._store is not None:
-            self.shutdown()
-        self._hermes_home = str(
-            kwargs.get("hermes_home") or os.environ.get("HERMES_HOME") or "."
-        )
-        cfg = _load_config(self._hermes_home)
-        module = _load_memory_module(self._hermes_home, cfg.get("mnemosyne_path"))
+        with self._lifecycle_lock:
+            if self._worker is not None or self._store is not None:
+                self.shutdown()
+            self._hermes_home = str(
+                kwargs.get("hermes_home") or os.environ.get("HERMES_HOME") or "."
+            )
+            cfg = _load_config(self._hermes_home)
+            module = _load_memory_module(self._hermes_home, cfg.get("mnemosyne_path"))
 
-        raw_db_path = cfg.get("db_path")
-        db_path = (
-            Path(raw_db_path).expanduser()
-            if raw_db_path
-            else Path(self._hermes_home) / "mnemosyne" / "memory.db"
-        )
-        if not db_path.is_absolute():
-            db_path = Path(self._hermes_home) / db_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+            db_path, profile_relative = _resolve_db_path(
+                self._hermes_home, cfg.get("db_path")
+            )
+            db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if profile_relative:
+                db_path.parent.chmod(0o700)
 
-        self._store = module.MemoryStore(path=db_path)
-        self._session_id = str(session_id or "hermes")
-        try:
-            self._prefetch_limit = max(1, min(int(cfg.get("prefetch_limit", 8)), 20))
-        except (TypeError, ValueError):
-            logger.warning("Invalid Mnemosyne prefetch_limit; using 8")
-            self._prefetch_limit = 8
-        self._automatic_writes = kwargs.get("agent_context", "primary") == "primary"
-        with self._cache_lock:
-            self._prefetch_cache.clear()
-            self._prefetch_generation += 1
-        self._worker = _WriteWorker()
+            self._store = module.MemoryStore(path=db_path)
+            self._db_path = db_path
+            _secure_sqlite_files(db_path)
+            self._session_id = str(session_id or "hermes")
+            try:
+                self._prefetch_limit = max(1, min(int(cfg.get("prefetch_limit", 8)), 20))
+            except (TypeError, ValueError):
+                logger.warning("Invalid Mnemosyne prefetch_limit; using 8")
+                self._prefetch_limit = 8
+            self._automatic_writes = kwargs.get("agent_context", "primary") == "primary"
+            with self._cache_lock:
+                self._prefetch_cache.clear()
+                self._prefetch_generation += 1
+            self._worker = _WriteWorker()
 
     def shutdown(self) -> None:
-        worker, self._worker = self._worker, None
-        if worker is not None:
-            worker.stop()
-        store, self._store = self._store, None
-        if store is not None:
-            try:
-                store.close()
-            except Exception:
-                logger.warning("Mnemosyne store close failed", exc_info=True)
+        with self._lifecycle_lock:
+            worker, self._worker = self._worker, None
+            if worker is not None:
+                worker.stop()
+                if worker.is_alive:
+                    raise RuntimeError("Mnemosyne writer remained alive after stop")
+            store, self._store = self._store, None
+            if store is not None:
+                try:
+                    store.close()
+                except Exception:
+                    logger.warning("Mnemosyne store close failed", exc_info=True)
+            if self._db_path is not None:
+                _secure_sqlite_files(self._db_path)
+            self._db_path = None
 
     def system_prompt_block(self) -> str:
         return (
@@ -384,7 +439,7 @@ class MnemosyneMemoryProvider(MemoryProvider):
             "memory_write, and memory_stats. Search before answering questions "
             "about the user's preferences, history, projects, or personal context. "
             "memory_write can store facts, preferences, goals, and patterns only "
-            "in L0-L4. L5 identity is human/trusted-code managed and is never "
+            "in L2-L4. L0 instinct, L1 working memory, and L5 identity are not "
             "model-writable."
         )
 
@@ -396,20 +451,23 @@ class MnemosyneMemoryProvider(MemoryProvider):
             return self._prefetch_cache.get(self._sid(session_id), "")
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
-        if not query.strip() or self._worker is None or self._store is None:
-            return
-        sid = self._sid(session_id)
-        with self._cache_lock:
-            generation = self._prefetch_generation
-
-        def _do_prefetch() -> None:
-            hits = self._store.search(query, limit=self._prefetch_limit)
-            formatted = _format_hits(hits)
+        with self._lifecycle_lock:
+            if not query.strip() or self._worker is None or self._store is None:
+                return
+            worker = self._worker
+            store = self._store
+            sid = self._sid(session_id)
             with self._cache_lock:
-                if generation == self._prefetch_generation and sid == self._session_id:
-                    self._prefetch_cache[sid] = formatted
+                generation = self._prefetch_generation
 
-        self._worker.submit(_do_prefetch)
+            def _do_prefetch() -> None:
+                hits = store.search(query, limit=self._prefetch_limit)
+                formatted = _format_hits(hits)
+                with self._cache_lock:
+                    if generation == self._prefetch_generation and sid == self._session_id:
+                        self._prefetch_cache[sid] = formatted
+
+            worker.submit(_do_prefetch)
 
     def sync_turn(
         self,
@@ -422,24 +480,25 @@ class MnemosyneMemoryProvider(MemoryProvider):
     ) -> None:
         """Queue primary-context turn persistence using the v0.21.4 signature."""
         del messages, turn_author
-        if not self._automatic_writes or self._worker is None or self._store is None:
-            return
-        sid = self._sid(session_id)
+        with self._lifecycle_lock:
+            if not self._automatic_writes or self._worker is None or self._store is None:
+                return
+            worker = self._worker
+            store = self._store
+            sid = self._sid(session_id)
 
-        def _write() -> None:
-            if user_content:
-                self._store.write(
-                    f"[user] {user_content}", source=sid, kind="turn", tier=2
-                )
-            if assistant_content:
-                self._store.write(
-                    f"[assistant] {assistant_content}",
-                    source=sid,
-                    kind="turn",
-                    tier=2,
-                )
+            def _write() -> None:
+                if user_content:
+                    store.write(f"[user] {user_content}", source=sid, kind="turn", tier=2)
+                if assistant_content:
+                    store.write(
+                        f"[assistant] {assistant_content}",
+                        source=sid,
+                        kind="turn",
+                        tier=2,
+                    )
 
-        self._worker.submit(_write)
+            worker.submit(_write)
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         return [
@@ -464,8 +523,8 @@ class MnemosyneMemoryProvider(MemoryProvider):
             {
                 "name": "memory_write",
                 "description": (
-                    "Store a fact, preference, goal, or pattern in L0-L4. "
-                    "L5 identity cannot be written by the model."
+                    "Store a fact, preference, goal, or pattern in L2-L4. "
+                    "L0 instinct, L1 working memory, and L5 identity cannot be written by the model."
                 ),
                 "parameters": {
                     "type": "object",
@@ -479,7 +538,7 @@ class MnemosyneMemoryProvider(MemoryProvider):
                         "tier": {
                             "type": "integer",
                             "default": 2,
-                            "minimum": 0,
+                            "minimum": _MODEL_MIN_TIER,
                             "maximum": _MODEL_MAX_TIER,
                         },
                     },
@@ -501,70 +560,88 @@ class MnemosyneMemoryProvider(MemoryProvider):
     def handle_tool_call(
         self, tool_name: str, args: Dict[str, Any], **kwargs: Any
     ) -> str:
-        if self._store is None:
-            return _json_result(error="Mnemosyne is not initialized")
-        args = args if isinstance(args, dict) else {}
-        try:
-            if tool_name == "memory_search":
-                query = str(args.get("query") or "").strip()
-                if not query:
-                    return _json_result(error="query is required")
-                limit = max(1, min(int(args.get("limit", 8)), 20))
-                hits = self._store.search(query, limit=limit)
-                return _json_result(results=_hits_as_json(hits), count=len(hits))
+        with self._lifecycle_lock:
+            if self._store is None:
+                return _json_result(error="Mnemosyne is not initialized")
+            store = self._store
+            args = args if isinstance(args, dict) else {}
+            try:
+                if tool_name == "memory_search":
+                    query = str(args.get("query") or "").strip()
+                    if not query:
+                        return _json_result(error="query is required")
+                    limit = max(1, min(int(args.get("limit", 8)), 20))
+                    hits = store.search(query, limit=limit)
+                    return _json_result(results=_hits_as_json(hits), count=len(hits))
 
-            if tool_name == "memory_write":
-                content = str(args.get("content") or "").strip()
-                if not content:
-                    return _json_result(error="content is required")
-                kind = str(args.get("kind") or "fact").strip().lower()
-                try:
-                    tier = int(args.get("tier", 2))
-                except (TypeError, ValueError):
-                    return _json_result(error="tier must be an integer from 0 through 4")
-                if kind not in _MODEL_WRITABLE_KINDS:
-                    return _json_result(
-                        error=(
-                            "kind must be one of fact, preference, goal, pattern; "
-                            "identity writes require trusted human-approved code"
+                if tool_name == "memory_write":
+                    content = str(args.get("content") or "").strip()
+                    if not content:
+                        return _json_result(error="content is required")
+                    kind = str(args.get("kind") or "fact").strip().lower()
+                    try:
+                        tier = int(args.get("tier", 2))
+                    except (TypeError, ValueError):
+                        return _json_result(
+                            error="tier must be an integer from 2 through 4"
                         )
+                    if kind not in _MODEL_WRITABLE_KINDS:
+                        return _json_result(
+                            error=(
+                                "kind must be one of fact, preference, goal, pattern; "
+                                "identity writes require trusted human-approved code"
+                            )
+                        )
+                    if tier < _MODEL_MIN_TIER or tier > _MODEL_MAX_TIER:
+                        return _json_result(
+                            error=(
+                                "tier must be from 2 through 4; L0 instinct, L1 working "
+                                "memory, and L5 identity are not model-writable"
+                            )
+                        )
+                    sid = self._sid(str(kwargs.get("session_id") or ""))
+                    memory_id = store.write(
+                        content, source=sid, kind=kind, tier=tier
                     )
-                if tier < 0 or tier > _MODEL_MAX_TIER:
+                    _secure_sqlite_files(self._db_path or Path(store.path))
                     return _json_result(
-                        error="tier must be from 0 through 4; L5 identity is not model-writable"
+                        stored=True, id=memory_id, tier=tier, kind=kind
                     )
-                sid = self._sid(str(kwargs.get("session_id") or ""))
-                memory_id = self._store.write(
-                    content, source=sid, kind=kind, tier=tier
-                )
-                return _json_result(
-                    stored=True, id=memory_id, tier=tier, kind=kind
-                )
 
-            if tool_name == "memory_stats":
-                return _json_result(**_stats_data(self._store))
+                if tool_name == "memory_stats":
+                    return _json_result(**_stats_data(store))
 
-            return _json_result(error=f"Unknown tool: {tool_name}")
-        except Exception as exc:
-            logger.warning("Mnemosyne tool %s failed", tool_name, exc_info=True)
-            return _json_result(error=f"{tool_name} failed: {exc}")
+                return _json_result(error=f"Unknown tool: {tool_name}")
+            except Exception as exc:
+                logger.warning("Mnemosyne tool %s failed", tool_name, exc_info=True)
+                return _json_result(error=f"{tool_name} failed: {exc}")
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
-        if not self._automatic_writes or self._worker is None:
-            return
-        extractions = _try_extract(messages)
-        if extractions:
-            sid = self._session_id
-            self._worker.submit(self._write_extractions, extractions, sid)
+        with self._lifecycle_lock:
+            if not self._automatic_writes or self._worker is None or self._store is None:
+                return
+            extractions = _try_extract(messages)
+            if extractions:
+                self._worker.submit(
+                    self._write_extractions,
+                    self._store,
+                    extractions,
+                    self._session_id,
+                )
 
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
-        if not self._automatic_writes or self._worker is None:
-            return ""
-        extractions = _try_extract(messages)
-        if not extractions:
-            return ""
-        sid = self._session_id
-        self._worker.submit(self._write_extractions, extractions, sid)
+        with self._lifecycle_lock:
+            if not self._automatic_writes or self._worker is None or self._store is None:
+                return ""
+            extractions = _try_extract(messages)
+            if not extractions:
+                return ""
+            self._worker.submit(
+                self._write_extractions,
+                self._store,
+                extractions,
+                self._session_id,
+            )
         parts = []
         for category in ("facts", "preferences", "goals", "patterns"):
             items = extractions.get(category, [])
@@ -573,7 +650,7 @@ class MnemosyneMemoryProvider(MemoryProvider):
         return "Preserved to memory — " + " | ".join(parts) if parts else ""
 
     def _write_extractions(
-        self, extractions: Dict[str, Any], session_id: str
+        self, store: Any, extractions: Dict[str, Any], session_id: str
     ) -> None:
         tiers = {
             "facts": 3,
@@ -584,7 +661,7 @@ class MnemosyneMemoryProvider(MemoryProvider):
         }
         for category, tier in tiers.items():
             for item in extractions.get(category, []):
-                self._store.write(
+                store.write(
                     str(item),
                     source=session_id,
                     kind=category.rstrip("s"),

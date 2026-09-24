@@ -202,4 +202,6 @@ Override the install clones via `ETERNAL_REPO=` / `FANTASTIC_REPO=` / `FANTASTIC
 - ~10 GB free disk for the model + venv
 - Optional: `whiptail` for the TUI wizard; `--text` mode works without it
 - Optional: GPU passthrough for faster inference (CPU works; `CPU_TORCH=1` skips the ~2GB CUDA wheels)
-- Optional: the `train` extra (`pip install "mnemosyne-harness[train]"`) only when you actually run `mnemosyne-train`
+- Optional: install the `train` extra from the same GitHub source tag only when
+  you actually run `mnemosyne-train`:
+  `python3 -m pip install "mnemosyne-harness[train] @ https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"`

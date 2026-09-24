@@ -27,11 +27,11 @@ so does the commit history.
 
 What we *do* claim: a zero-dependency, stdlib-only Python agent
 framework that runs locally, speaks 19 model backends, keeps a
-four-tier memory that survives context wipes, ships with an evolving
+six-tier memory that survives context wipes, ships with an evolving
 avatar dashboard, audits its own routing layer, and closes the
 Meta-Harness feedback loop — proposer to apply to measure — end to
-end. Measurable, auditable, 246 unit tests green, installed with one
-`pip install`.
+end. Measurable, auditable, and covered by an offline test suite; installable
+with one source-tag `pip install` command.
 
 Everything below is load-bearing on that claim. Skip to the
 [architecture](#architecture) if you want the technical meat; stay
@@ -317,8 +317,8 @@ on the table.
 ### 2. Stdlib-only is a real constraint, and it's worth the cost.
 
 We imposed a rule early: no runtime dependencies. Everything we ship
-has to import from Python's standard library. `pip install
-mnemosyne-harness` pulls in *nothing* from PyPI.
+has to import from Python's standard library. Installing Mnemosyne from its
+GitHub release or source tag pulls in *no runtime dependencies* from PyPI.
 
 This is painful. We can't use `pydantic` for data classes, `httpx`
 for HTTP, `sqlalchemy` for SQL, `rich` for terminal UI, `fastapi`

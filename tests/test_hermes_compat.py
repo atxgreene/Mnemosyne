@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 _EXPECTED_HERMES_VERSION = "0.21.4"
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[1]
 
 
 def main(argv: list[str] | None = None) -> int:
