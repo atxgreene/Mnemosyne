@@ -1,14 +1,16 @@
 # Quickstart
 
-Ten lines from `pip install` to your first conversation with an evolving avatar.
+From a GitHub source-tag install to your first conversation with an evolving avatar.
 
 ## 1. Install
 
 ```sh
-pip install mnemosyne-harness
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"
 ```
 
-That's it. Stdlib only — no torch, no transformers, no langchain.
+Mnemosyne is not published on PyPI. The core installed from the v0.9.8 GitHub
+tag is stdlib-only — no torch, transformers, or LangChain runtime dependency.
 
 ## 2. Pick a backend
 
@@ -69,8 +71,8 @@ You ran a stdlib-only daemon that:
 3. **Computed avatar state** deterministically from observable signals.
    No magic — every visual property maps to a number you can grep out of
    `~/projects/mnemosyne/avatar.json`.
-4. **Stored the turn** in a SQLite + FTS5 memory store with a 3-tier
-   policy (L1 hot / L2 warm / L3 cold). Searchable from the dashboard's
+4. **Stored the turn** in a SQLite + FTS5 memory store with a six-tier
+   policy (L0 instinct through L5 identity). Searchable from the dashboard's
    memory browser panel.
 
 ## Common next moves

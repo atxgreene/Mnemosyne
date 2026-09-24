@@ -97,8 +97,8 @@ OpenAI, Anthropic, 15 more) with:
    chat, cost accounting, training-data export for LoRA fine-tuning,
    and a long-running daemon with systemd and launchd units.
 
-Stdlib only. 22 console scripts. 246 unit tests green. One
-`pip install mnemosyne-harness` away.
+Stdlib only. 22 console scripts. 246 unit tests green. Installable from a
+reviewed GitHub source tag.
 
 ---
 
@@ -544,8 +544,8 @@ dashboard. Continuity Score test suite + similarity scorer.
 **v0.8.0**: Contradictions detection between patterns. Inner-
 dialogue synthesis when two patterns conflict.
 
-**v0.9.0**: Live-model demo recorded; benchmarks run; PyPI publish;
-GitHub release tagged.
+**v0.9.0**: Live-model demo recorded; benchmarks run; GitHub release tagged.
+The planned PyPI publication did not occur.
 
 **v1.0.0**: The "you can use this" cut. Not AGI. Just a trustworthy,
 measurable, local-first agent framework that people who aren't us
@@ -580,7 +580,8 @@ on top of it, open an issue and tell us what you learned.
 ## Try it
 
 ```sh
-pip install mnemosyne-harness
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"
 mnemosyne-serve &
 open http://127.0.0.1:8484/ui
 ```

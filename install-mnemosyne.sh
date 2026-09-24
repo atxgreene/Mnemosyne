@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  install-mnemosyne.sh
-#  Reproducible bootstrap for the Mnemosyne agent (eternal-context + fantastic-disco)
+#  RETIRED pre-v0.2 multi-repository bootstrap (eternal-context + fantastic-disco)
 #  on WSL2 Ubuntu / Linux / macOS.
 #
 #  What this script does (idempotent — safe to re-run):
@@ -19,11 +19,11 @@
 #
 #  This script does NOT touch OpenClaw or any existing workspace.
 #
-#  Usage:
-#    bash install-mnemosyne.sh                       # default: qwen3:8b model
-#    MODEL=llama3.1:8b bash install-mnemosyne.sh     # override model
-#    PROJECTS_DIR=$HOME/code bash install-mnemosyne.sh   # override location
-#    CPU_TORCH=1 bash install-mnemosyne.sh           # force CPU-only torch wheels
+#  Usage (legacy deployments only):
+#    bash install-mnemosyne.sh --legacy-multi-repo
+#    MODEL=llama3.1:8b bash install-mnemosyne.sh --legacy-multi-repo
+#    PROJECTS_DIR=$HOME/code bash install-mnemosyne.sh --legacy-multi-repo
+#    CPU_TORCH=1 bash install-mnemosyne.sh --legacy-multi-repo
 #                                                    # (~200MB vs ~2GB CUDA)
 #
 #  All config is via env vars (no CLI flags):
@@ -36,6 +36,16 @@
 # ==============================================================================
 
 set -euo pipefail
+
+if [ "${1:-}" != "--legacy-multi-repo" ]; then
+  printf '%s\n' \
+    "RETIRED: install-mnemosyne.sh provisions the pre-v0.2 multi-repo stack." \
+    "Install current v0.9.8 from the GitHub release/source tag instead:" \
+    "  python3 -m pip install https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz" \
+    "To operate an existing legacy deployment, rerun with --legacy-multi-repo." >&2
+  exit 2
+fi
+shift
 
 # Resolve where this script lives so we can point at sibling files (wizard).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

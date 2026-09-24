@@ -2,12 +2,55 @@
 
 All notable changes to the Mnemosyne harness deployment repo. The format is loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Dates are ISO 8601.
 
+## [0.9.8] — 2026-09-24 — public release hardening
+
+### Hermes Agent v0.21.4
+
+- Packaged and registered `integrations.hermes` through the
+  `hermes_agent.memory_providers` entry-point group.
+- Aligned config descriptors, JSON tool results, `sync_turn`, session-switch
+  handling, context-preserving background work, dynamic module resolution,
+  atomic config writes, and failure logging with the installed v0.21.4
+  contract.
+- Restricted model-callable writes to L0-L4 and non-identity kinds in both
+  schema and handler while preserving direct trusted `MemoryStore` L5 writes.
+- Added standalone provider tests and a real-Hermes compatibility test using a
+  temporary isolated `HERMES_HOME`.
+
+### Packaging and installation
+
+- Bumped package/plugin/docs version to 0.9.8 and included the Hermes package,
+  manifest, README, and provider entry point in wheel builds.
+- Replaced current bare-PyPI instructions with GitHub release/source-tag
+  installation because no Mnemosyne PyPI project exists.
+- Retired the pre-v0.2 multi-repository installer behind an explicit
+  `--legacy-multi-repo` acknowledgement.
+- Fixed the macOS `/tmp` canonical-path assertion and removed `mapfile` from
+  the integration harness for the system Bash 3.2.
+
+### Benchmark integrity
+
+- Replaced the permissive any-one-four-character-token judge with deterministic
+  lexical answer coverage requiring a phrase, exact one-token answer, or at
+  least two tokens and 60% content-token coverage.
+- Relabeled lexical metrics as coverage rather than accuracy, added
+  adversarial regressions, and kept judge-free retrieval recall distinct.
+- Added `bench/sanitize_results.py`; checked-in LOCOMO artifacts are now
+  aggregate-only with source/dataset provenance and no dataset text or
+  per-question records. Historical permissive-judge values are prefixed
+  `legacy_` and explicitly non-comparable to the hardened judge.
+
+### CI/release gates
+
+- Added provider, exact Hermes compatibility, benchmark self-test, build,
+  `twine check`, wheel-install, package-entry-point, and Bash harness gates.
+
 ## [0.9.8-bench] — 2026-06-11 — measured LOCOMO retrieval track + LongMemEval runner
 
 Full LOCOMO retrieval-track results published with reproducible
 setup, same-protocol baselines, and token/latency/cost detail; new
 LongMemEval runner with a passing dataset-free selftest. Report:
-`docs/BENCHMARKS_LOCOMO.md`; dated raw JSON:
+`docs/BENCHMARKS_LOCOMO.md`; dated aggregate JSON (relabelled in v0.9.8):
 `docs/benchmark-results/2026-06-11-locomo-retrieval-track.json`.
 
 **Measured (Linux x86_64 sandbox, Python 3.11, stdlib only, $0):**
@@ -279,10 +322,9 @@ which doesn't exist) and wrong schema assumptions (flat
   (LOCOMO). Legacy v0.2-era throughput tables below still stand
   as reference.
 
-Note: this is a docs/visibility release — no user-facing API
-changed. `pip install mnemosyne-harness==0.9.4` upgrades the
-dashboard's trait count (dashboard must be restarted to pick up
-the new `compute_state()` keys) and the LOCOMO runner's
+Note: this was a docs/visibility release — no user-facing API
+changed. The v0.9.4 GitHub tag upgraded the dashboard's trait count
+(dashboard must be restarted to pick up the new `compute_state()` keys) and the LOCOMO runner's
 correctness, but existing code targeting v0.9.3 keeps running.
 
 **Tests:** 291/291 green (unchanged). pyflakes clean.
@@ -485,8 +527,9 @@ at CHANGELOG for the current 6-tier shape.
 **SETUP.md banner.** Added a header noting SETUP.md describes the
 pre-v0.2 multi-repo era (where Mnemosyne was a bootstrap that cloned
 `eternal-context` and `fantastic-disco` as separate repos). That
-flow is obsolete since v0.2.0 collapsed everything into one
-pip-installable package. Readers routed to `docs/QUICKSTART.md`.
+flow is obsolete since v0.2.0 collapsed everything into one package.
+Current installs use a GitHub release/source tag; readers are routed to
+`docs/QUICKSTART.md`.
 
 **docs/CONTEXT-DROP.md banner.** Clarified this is a maintainer-only
 session-handoff doc, not user documentation. It ships in the repo so
@@ -1089,8 +1132,8 @@ integration + off-by-default behavior.
 
 ## [0.4.0] — 2026-04-15 — PyPI-ready + security audit + perf
 
-First release intended for `pip install mnemosyne-harness` (when
-the maintainer cuts the PyPI upload). Three substantive passes since
+First release originally intended for a PyPI upload. That publication did not
+occur; current installs use GitHub release/source tags. Three substantive passes since
 v0.3.5: packaging polish, full security audit with one fix shipped,
 and a 389× speedup on the dashboard's hot path.
 

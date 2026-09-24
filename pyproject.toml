@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne-harness"
-version = "0.9.7"
+version = "0.9.8"
 description = "Local-first LLM agent framework: ICMS 6-tier memory with Reflection → Instinct loop, 19 model backends, 4-layer identity lock, evolving avatar dashboard. Stdlib only."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [{ name = "atxgreene" }]
 maintainers = [{ name = "atxgreene" }]
@@ -24,7 +25,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
@@ -98,6 +98,9 @@ mnemosyne-adapter-claude-code = "mnemosyne_adapter_claude_code:_main"
 mnemosyne-compactor    = "mnemosyne_compactor:_main"
 mnemosyne-continuity   = "mnemosyne_continuity:_main"
 mnemosyne-instinct     = "mnemosyne_instinct:_main"
+
+[project.entry-points."hermes_agent.memory_providers"]
+mnemosyne = "integrations.hermes:register"
 
 [tool.setuptools]
 # Flat layout: every module lives at the repo root. No src/ directory.
@@ -178,7 +181,7 @@ py-modules = [
 # assets can ship as package_data. The flat-layout py-modules above
 # can't carry data files; only packages can.
 [tool.setuptools.packages.find]
-include = ["mnemosyne_ui*"]
+include = ["mnemosyne_ui*", "integrations*"]
 
 [tool.setuptools.package-data]
 mnemosyne_ui = [
@@ -188,4 +191,7 @@ mnemosyne_ui = [
     "static/*.svg",
     "static/*.ico",
 ]
-"*" = ["scenarios.example.jsonl"]
+"integrations.hermes" = ["plugin.yaml", "README.md"]
+
+[tool.setuptools.data-files]
+"share/mnemosyne" = ["scenarios.example.jsonl"]

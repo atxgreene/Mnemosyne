@@ -86,7 +86,7 @@ harnesses don't have them yet:
   dead-fraction. Triage can cluster on `dead_fraction > 0.5` as a
   drift signal.
 - **Stdlib-only core.** Zero runtime dependencies. 25 console scripts
-  installed by `pip install mnemosyne-harness`. The whole substrate is
+  installed from the GitHub source tag. The whole substrate is
   auditable in an afternoon.
 
 ---
@@ -224,6 +224,7 @@ that's a real bug — open an issue with the failing command and the
 output, and we'll either fix the code or fix the doc.
 
 ```sh
-pip install mnemosyne-harness
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"
 # Then walk the table — each verify command is one line.
 ```

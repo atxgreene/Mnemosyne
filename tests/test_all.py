@@ -4159,7 +4159,9 @@ def _():
         out = pd / "autobio"
         result = store.export_to_git(out, tier_min=2)
         assert result["count"] == 1
-        assert result["repo"] == str(out)
+        # macOS commonly resolves /tmp to /private/tmp. export_to_git returns
+        # its canonical target path, so compare canonical paths on all OSes.
+        assert Path(result["repo"]) == out.resolve()
         store.close()
     finally:
         shutil.rmtree(pd)

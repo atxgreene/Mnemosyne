@@ -9,7 +9,7 @@ main but the behavior can regress without a loud signal), or
 The yardstick is "could a stranger reproduce this with `git clone && pip
 install -e . && ./demo.sh` on a fresh laptop?" If yes, it's verifiable.
 
-Current release: **v0.9.7** (`mnemosyne-harness`, Beta). The cognitive-OS
+Current release: **v0.9.8** (`mnemosyne-harness`, Beta). The cognitive-OS
 checklist is 5/5 ✓ (v0.7.0); the 12-component harness audit is 9 ✓ + 3
 partial (v0.8.0); the Reflection → Instinct loop shipped in v0.9.
 
@@ -50,7 +50,7 @@ partial (v0.8.0); the Reflection → Instinct loop shipped in v0.9.
 | **Avatar dashboard (29 derived traits) + static UI** | `mnemosyne_avatar`, `mnemosyne_ui` | derived-state tests; served by `mnemosyne-serve` |
 | Long-running daemon (dream / triage / proposer crons) | `mnemosyne_serve` | HTTP smoke test |
 | Jailbreak scenario suite (40 prompts) | `scenarios/jailbreak.jsonl` | run with `mnemosyne-pipeline` on your backend |
-| **Hermes memory provider — runtime-validated** | `integrations/hermes/` | 8/8 checks on live Hermes v0.16.0 (see `docs/HERMES.md`) |
+| **Hermes memory provider — packaged and contract-validated** | `integrations/hermes/` | standalone suite + isolated real-Hermes v0.21.4 compatibility test (see `docs/HERMES.md`) |
 | 25-command CLI (via `pip install -e .`) | `pyproject.toml` `[project.scripts]` | CI install-smoke |
 | GitHub Actions CI | `.github/workflows/ci.yml` | runs on every push |
 
@@ -62,15 +62,12 @@ multi-section transcript) to verify any row above.
 
 - **Retrieval recall@5 = 0.8704** on a deterministic probe set (recall@5 /
   MRR / hit@1 by category).
-- **LOCOMO retrieval track = 0.6247** answer-in-context / **0.5009**
-  evidence recall@8 over the standard 1,540 scored questions
-  (`snap-research/locomo`), vs 0.2468 recency / 0.2799 random
-  same-protocol baselines and a 0.8727 full-context ceiling — at 319
-  context tokens/probe vs 22,576. Full reproducible setup, top-k
-  sweep, and token/latency/cost: [`docs/BENCHMARKS_LOCOMO.md`](./BENCHMARKS_LOCOMO.md).
-  (Supersedes the earlier 0.4849/1,986 figure, which divided the same
-  run by a denominator including 446 unanswerable-without-a-model
-  adversarial questions.)
+- **LOCOMO judge-free evidence recall@8 = 0.5009** for FTS top-8 over
+  rows with gold dialogue IDs, vs 0.0054 recency / 0.0198 random and
+  0.9961 full conversation, at 319 context tokens/probe vs 22,576.
+  Historical lexical values are preserved only as `legacy_answer_coverage`,
+  not accuracy. Protocol and aggregate-only provenance:
+  [`docs/BENCHMARKS_LOCOMO.md`](./BENCHMARKS_LOCOMO.md).
 - **Continuity = 0.96 aggregate / 1.00 cross-session** (substrate dryrun, v0.7.1).
 - Throughput (single-thread reference): **0.21 ms/write**, **7.17 ms** search
   p50 over a 10K corpus, **1.20 ms (0.24%)** Brain wrapper overhead at
