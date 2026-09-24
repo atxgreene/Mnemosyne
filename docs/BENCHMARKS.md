@@ -12,15 +12,15 @@ from *my* hardware, it's labelled as such — your mileage will vary.
   Live-model upper bound: `mnemosyne-continuity run --provider
   lmstudio|ollama --model <id> --verbose`.
 - **LOCOMO + LongMemEval** → [`docs/BENCHMARKS_LOCOMO.md`](./BENCHMARKS_LOCOMO.md)
-  — **measured numbers** (2026-06-11): retrieval track 0.6247
-  answer-in-context / 0.5009 evidence recall@8 over the standard
-  1,540 scored questions, vs same-protocol recency (0.2468), random
-  (0.2799) baselines and full-context ceiling (0.8727); top-k
-  token/score sweep; search p50 2.76 ms; $0 cost; dated raw JSON in
-  [`benchmark-results/`](./benchmark-results/). LongMemEval runner
-  shipped with passing `--selftest`; numbers pending a machine with
-  HuggingFace access. Runner usage: [`bench/README.md`](../bench/README.md).
-  Datasets are never redistributed; fetch them from upstream.
+  — **measured retrieval numbers** (2026-06-11): judge-free FTS top-8
+  evidence recall@8 0.5009 over rows with gold evidence IDs, vs recency
+  0.0054, random 0.0198, and full-conversation 0.9961; search p50
+  2.76 ms; aggregate-only dated JSON with provenance in
+  [`benchmark-results/`](./benchmark-results/). Historical lexical-match
+  values are labeled legacy answer coverage, not accuracy. LongMemEval runner
+  shipped with passing `--selftest`; full numbers are not claimed. Runner
+  usage: [`bench/README.md`](../bench/README.md). Datasets are never
+  redistributed; fetch them from upstream.
 - **Throughput + instrumentation overhead** (below) → v0.2-era
   reference numbers. Not re-run against the v0.9 substrate;
   treat as upper-bound order-of-magnitude, not absolute truth.

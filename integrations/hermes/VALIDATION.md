@@ -1,114 +1,51 @@
-# Kestrel Windows — Mnemosyne Hermes memory-provider smoke
+# Hermes provider validation
 
-## Runtime memory-provider validation — 2026-06-11T05:09:22Z (2026-06-11 00:09:22 CDT)
+This file records the reproducible validation contract for Mnemosyne v0.9.8.
+It supersedes the historical v0.16.0 machine-specific validation log.
 
-**Machine label:** Kestrel Windows PC
-**Branch:** `claude/gracious-newton-auh2kh`
-**Purpose:** Make Mnemosyne work as Kestrel's local Hermes memory provider using SQLite + FTS5. Semantic embeddings were intentionally skipped.
+## Supported contract
 
-## Environment
+- Hermes Agent: exactly v0.21.4 for the release compatibility gate.
+- Mnemosyne: v0.9.8.
+- Storage: local SQLite/FTS5.
+- Network/API keys: none for provider tests.
+- Test state: temporary `HERMES_HOME`; no real profile or memory database.
 
-| item | value |
-|---|---|
-| Python | 3.11.15 `[MSC v.1944 64 bit (AMD64)]` |
-| Hermes runtime | Hermes Agent v0.16.0 |
-| Hermes root | `C:\Users\austi\AppData\Local\hermes\hermes-agent` |
-| Hermes home | `C:\Users\austi\AppData\Local\hermes` |
-| Hermes config path | `C:\Users\austi\AppData\Local\hermes\config.yaml` |
-| Mnemosyne checkout | `C:\Users\austi\Repos\Mnemosyne` |
-| `MNEMOSYNE_PATH` | `C:/Users/austi/Repos/Mnemosyne` |
-| plugin install path | `C:\Users\austi\AppData\Local\hermes\plugins\mnemosyne` |
-| plugin config path | `C:\Users\austi\AppData\Local\hermes\mnemosyne.json` |
-| database path | `C:\Users\austi\.mnemosyne\kestrel-hermes.db` |
+## Commands
 
-`memory.provider` is set to `mnemosyne` in Hermes config. The plugin is also enabled via `hermes plugins enable mnemosyne`.
-
-## Explicitly out of scope for this round
-
-- Hugging Face dependency: **not used**.
-- sentence-transformers dependency: **not used**.
-- LM Studio embeddings: **not used**.
-- Dense/hybrid retrieval: **not used**.
-- Semantic retrieval improvement: **not tested / not claimed**.
-
-## Standalone smoke
-
-Command:
-
-```powershell
-python experiments\hermes_plugin\mnemosyne\test_provider.py
+```sh
+python3 tests/test_hermes_provider.py
+python3 tests/test_hermes_compat.py \
+  --hermes-root /path/to/hermes-agent-v0.21.4
 ```
 
-Result: **PASS**.
+The release gate also installs the built wheel and resolves the
+`hermes_agent.memory_providers` entry point named `mnemosyne`.
 
-Passed checks:
+## Required checks
 
-- `system_prompt_block`
-- `get_tool_schemas`
-- `memory_write` ×3
-- `sync_turn`
-- `queue_prefetch` / `prefetch`
-- `memory_search`
-- `memory_stats`
-- `on_session_end`
-- `on_pre_compress`
-- `shutdown`
+- key-based config schema and atomic private config persistence;
+- JSON-object results for search, write, stats, validation failures, and
+  unknown tools;
+- model-callable L5/identity rejection in schema and handler;
+- direct trusted `MemoryStore` L5 write remains functional;
+- exact current `sync_turn` signature, including `messages` and `turn_author`;
+- turn context preserved through the background writer;
+- automatic writes limited to `agent_context="primary"`;
+- session switch updates write source and invalidates old/in-flight prefetch;
+- configured checkout and installed-module resolution;
+- provider registration through Hermes' real collector/manager;
+- writer flush, SQLite durability, and clean shutdown.
 
-## Hermes/Kestrel runtime checks
+## Local release result
 
-Runtime check used Hermes' installed plugin loader and `MemoryManager` from:
-
-`C:\Users\austi\AppData\Local\hermes\hermes-agent`
-
-| check | result |
-|---|---|
-| plugin discovery | PASS — `discover_memory_providers()` returned `mnemosyne` with `available=True` |
-| plugin enabled | PASS — `hermes plugins list --plain --no-bundled` shows `enabled user 0.1.0 mnemosyne` |
-| provider load | PASS — `load_memory_provider("mnemosyne")` returned provider name `mnemosyne` |
-| provider availability | PASS — imports `mnemosyne_memory.py` from `MNEMOSYNE_PATH` |
-| session initialization | PASS — `MemoryManager.initialize_all()` initialized provider for `kestrel-runtime-mnemosyne-smoke` |
-| tool routing | PASS — `memory_write`, `memory_search`, `memory_stats` registered in `MemoryManager` |
-| memory_write | PASS — `Memory stored (id=1, tier=2, kind=fact).` |
-| memory_search | PASS — returned planted memory |
-| memory_stats | PASS — `Memory stats (total 3): tier 2: 3` |
-| conversation turn persistence | PASS — two `kind='turn'` rows persisted for the smoke session |
-| prefetch | PASS — non-empty context returned and included Mnemosyne content |
-| shutdown / flush | PASS — `shutdown_all()` returned; SQLite verification found persisted rows |
-
-Planted memory:
+The v0.9.8 hardening branch was exercised against the installed Hermes Agent
+v0.21.4 source tree with an isolated temporary home. The compatibility script
+must print:
 
 ```text
-Kestrel memory smoke test: Austin wants Mnemosyne as Hermes memory.
+PASS: Mnemosyne provider is compatible with Hermes Agent 0.21.4 using isolated HERMES_HOME
 ```
 
-Search query:
-
-```text
-What does Austin want as Hermes memory?
-```
-
-Search result contained the planted memory.
-
-SQLite verification after shutdown:
-
-| probe | value |
-|---|---:|
-| database exists | true |
-| total rows | 3 |
-| planted smoke memory rows | 1 |
-| persisted turn rows for smoke session | 2 |
-
-## Windows path/config notes
-
-- User plugin install path is `C:\Users\austi\AppData\Local\hermes\plugins\mnemosyne`; this is the path Hermes scans for user-installed memory providers.
-- Main Mnemosyne checkout lives locally at `C:\Users\austi\Repos\Mnemosyne`.
-- Mnemosyne DB lives locally at `C:\Users\austi\.mnemosyne\kestrel-hermes.db`.
-- No Windows path issue observed with spaces in unrelated repo paths; this runtime integration uses local non-cloud paths.
-- Fixed provider tool schemas to match Hermes `MemoryManager` routing expectations.
-- Fixed stats to use SQLite counts instead of search-term sampling.
-
-## Runtime integration status
-
-**Confirmed through Hermes runtime modules.** Kestrel can use Mnemosyne as a Hermes memory provider for local SQLite-backed write/search/stats/turn persistence/shutdown.
-
-One remaining operational confirmation is a fresh interactive Hermes chat process after restart, so the running assistant session also starts with the provider loaded from config.
+No claim in this document implies validation against a user's live profile or
+interactive chat process.

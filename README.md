@@ -4,9 +4,9 @@
      See docs/images/README.md for asset slots and filenames. -->
 ![Mnemosyne — A cognitive OS for local-first AI agents](docs/images/hero-owl-banner.png)
 
-**A cognitive OS for local-first agents. Stdlib only. One pip install away.**
+**A cognitive OS for local-first agents. Stdlib-only core, installable from GitHub.**
 
-`mnemosyne-harness` **v0.9.7** · Beta · MIT · Python ≥ 3.9 · zero runtime dependencies
+`mnemosyne-harness` **v0.9.8** · Beta · MIT · Python ≥ 3.9 · zero runtime dependencies
 · **[Live site → atxgreene.github.io/Mnemosyne](https://atxgreene.github.io/Mnemosyne/)**
 
 *All five rows of the [cognitive-OS checklist](./docs/COGNITIVE_OS.md) are ✓ as of v0.7.0; the [12-component agent harness audit](./docs/HARNESS.md) is 9 ✓ + 3 partial as of v0.8.0; the v0.9 **Reflection → Instinct loop** distills higher tiers into an L0 fast-path. Each row is backed by a verify command. Not marketing — audit it yourself.*
@@ -20,9 +20,9 @@ Channels (REST/CLI/Telegram/Slack/Discord/Avatar UI) → Brain (context assembly
 
 ## Hermes memory provider — runtime-validated
 
-Mnemosyne ships as a drop-in **memory provider for [Hermes Agent](https://hermes-agent.nousresearch.com)** (Nous Research) — validated end-to-end on a live Hermes **v0.16.0** runtime (2026-06-11): discovery, tool routing (`memory_search` / `memory_write` / `memory_stats`), turn persistence, prefetch, clean shutdown, and fresh-session chat-loop recall — **8/8 checks passing** against local SQLite.
+Mnemosyne ships an installable **memory provider for [Hermes Agent](https://hermes-agent.nousresearch.com)** (Nous Research). v0.9.8 is contract-tested against the installed Hermes **v0.21.4** implementation: package entry-point registration, discovery-compatible schemas, JSON tool results, primary-context-only automatic writes, turn persistence, prefetch/cache reset across session switches, and clean shutdown against an isolated `HERMES_HOME`.
 
-What you get over other memory providers: a fully local stdlib core (no API keys, no vector DB, no cloud), the 6-tier ICMS with ACT-R decay, Hebbian strength, and promotion semantics instead of a flat fact store, offline dream/consolidation services over the same database, and **published eval-gated benchmarks** — retrieval **recall@5 0.8704**, **LOCOMO retrieval track 0.6247** answer-in-context over the standard 1,540 scored questions (2.2–2.5× the same-protocol recency/random baselines at ~71× fewer context tokens than full history; full setup + token/latency/cost in [docs/BENCHMARKS_LOCOMO.md](docs/BENCHMARKS_LOCOMO.md)), **Continuity 0.96 / 1.00 cross-session** — each regression-gated by `check_regression.py`.
+What you get over other memory providers: a fully local stdlib core (no API keys, vector DB, or cloud), the 6-tier ICMS with ACT-R decay, Hebbian strength, promotion semantics, and offline consolidation. The published LOCOMO artifact reports judge-free **evidence recall@8 of 0.5009** for FTS top-8; historical lexical-match values are labeled legacy answer coverage, not accuracy. See [docs/BENCHMARKS_LOCOMO.md](docs/BENCHMARKS_LOCOMO.md) for protocol and provenance.
 
 → Setup, validation log, benchmarks: [docs/HERMES.md](docs/HERMES.md) · plugin: [integrations/hermes/](integrations/hermes/) · eval harness: [atxgreene/mnemosyne-lab](https://github.com/atxgreene/mnemosyne-lab)
 
@@ -31,7 +31,8 @@ What you get over other memory providers: a fully local stdlib core (no API keys
 ![dashboard](docs/dashboard.png)
 
 ```sh
-pip install mnemosyne-harness
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"
 mnemosyne-serve &                           # daemon + dashboard
 open http://127.0.0.1:8484/ui              # avatar evolves in real time
 ```
@@ -45,7 +46,7 @@ provider, and treat the agent as a black box. Mnemosyne goes the other way.
 
 | Differentiator | Concrete |
 |---|---|
-| **Stdlib-only core** | Zero runtime dependencies. `pip install mnemosyne-harness` pulls *nothing* from PyPI. The whole framework imports from Python's standard library. Auditable in an afternoon. |
+| **Stdlib-only core** | Zero runtime dependencies. The GitHub source-tag install adds no runtime packages. The whole framework imports from Python's standard library. Auditable in an afternoon. |
 | **19 backends through one API** | Ollama, LM Studio, OpenAI, Anthropic, OpenRouter, Together, Fireworks, Groq, DeepSeek, Cerebras, Hyperbolic, Perplexity, Novita, Nous, Google, xAI, Mistral, Cohere, vLLM, TGI. One `Backend(provider="…", default_model="…")` call. |
 | **6-tier ICMS memory** | L0 instinct / L1 hot / L2 warm / L3 cold / L4 pattern / L5 identity. ACT-R-style decay per content kind, Hebbian strength on retrieval, L3→L4 compaction, and the Reflection → Instinct loop populating L0 — not a flat fact store. |
 | **4-layer identity lock** | Whether the model is Qwen, Claude, or GPT-4, the agent identifies as Mnemosyne. 6/6 canonical slips rewritten in the suite; measured against a 40-prompt jailbreak set (`scenarios/jailbreak.jsonl`). |
@@ -93,7 +94,7 @@ The brain handles memory retrieval, tool dispatch, identity enforcement, inner d
 
 ## Read these next
 
-- [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) — **start here.** 10 lines from `pip install` to first conversation.
+- [`docs/QUICKSTART.md`](./docs/QUICKSTART.md) — **start here.** GitHub source-tag install to first conversation.
 - [`docs/HERMES.md`](./docs/HERMES.md) — the drop-in Hermes memory provider: install, runtime validation, benchmarks.
 - [`docs/ROADMAP.md`](./docs/ROADMAP.md) — what's shipped vs experimental vs research vs aspirational. Honest.
 - [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, audit findings, defenses, hardening guide.
@@ -104,7 +105,7 @@ The brain handles memory retrieval, tool dispatch, identity enforcement, inner d
 - [`docs/LOCAL_MODELS.md`](./docs/LOCAL_MODELS.md) — context-window math + model choice guide for Ollama.
 - [`docs/TRAINING.md`](./docs/TRAINING.md) — fine-tune a LoRA adapter from your captured conversations.
 - [`docs/DEMO.md`](./docs/DEMO.md) — captured transcript of `./demo.sh`.
-- [`RELEASE.md`](./RELEASE.md) — maintainer's release procedure (PyPI + GitHub).
+- [`RELEASE.md`](./RELEASE.md) — maintainer's GitHub release procedure.
 - [`CHANGELOG.md`](./CHANGELOG.md) — version-by-version record.
 
 ## Verify anything on this page
@@ -117,14 +118,19 @@ bash test-harness.sh                # end-to-end integration assertions
 ./validate-mnemosyne.sh             # environment health check
 ```
 
-## Deployment path
+## Installation path
 
 ```sh
-bash install-mnemosyne.sh        # clones eternal-context + fantastic-disco, builds venv, pip install -e .
-bash mnemosyne-wizard.sh         # interactive .env setup: LLM / Telegram / Slack / Obsidian / Notion
-bash validate-mnemosyne.sh       # confirm healthy
-mnemosyne-serve &                # optional: long-running daemon with dream + proposer cron
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"
+mnemosyne-serve &
 ```
+
+`install-mnemosyne.sh` is the retired pre-v0.2 multi-repository bootstrap. It
+does not install the current package and now requires an explicit
+`--legacy-multi-repo` acknowledgement before it will run.
 
 After install, these commands are on `$PATH` (one per `[project.scripts]` entry):
 
@@ -196,4 +202,6 @@ Override the install clones via `ETERNAL_REPO=` / `FANTASTIC_REPO=` / `FANTASTIC
 - ~10 GB free disk for the model + venv
 - Optional: `whiptail` for the TUI wizard; `--text` mode works without it
 - Optional: GPU passthrough for faster inference (CPU works; `CPU_TORCH=1` skips the ~2GB CUDA wheels)
-- Optional: the `train` extra (`pip install "mnemosyne-harness[train]"`) only when you actually run `mnemosyne-train`
+- Optional: install the `train` extra from the same GitHub source tag only when
+  you actually run `mnemosyne-train`:
+  `python3 -m pip install "mnemosyne-harness[train] @ https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"`

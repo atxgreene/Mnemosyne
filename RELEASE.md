@@ -1,99 +1,113 @@
 # Release procedure
 
-How to cut a Mnemosyne release. Steps assume you're the maintainer
-with write access to PyPI and to the GitHub repo.
+Mnemosyne is not published on PyPI. Releases are source tags plus GitHub release
+assets. Do not use `twine upload` or claim that a package-name-only pip install
+works.
 
-## Prereqs (one-time)
+## v0.9.8 release gates
 
-```sh
-pip install --upgrade build twine
-# Set up your PyPI token (https://pypi.org/manage/account/token/)
-mkdir -p ~/.config/pypi
-cat > ~/.pypirc <<EOF
-[pypi]
-username = __token__
-password = pypi-AgEI…   # your token here
-EOF
-chmod 600 ~/.pypirc
-```
-
-## Cut a release
+From a clean checkout:
 
 ```sh
-# 1. Bump the version in pyproject.toml and CHANGELOG.md
-# 2. Verify everything is clean
-python3 tests/test_all.py             # expect green
-python3 -m pyflakes *.py examples/*.py tests/*.py
-shellcheck -x *.sh
-bash test-harness.sh                  # 29 integration assertions
+python3 -m venv .release-venv
+.release-venv/bin/python -m pip install --upgrade \
+  "pip==25.2" "build==1.3.0" "twine==6.2.0" "pyflakes==3.4.0"
+.release-venv/bin/python tests/test_all.py
+/bin/bash test-harness.sh
+.release-venv/bin/python tests/test_hermes_provider.py
+.release-venv/bin/python tests/test_release_contracts.py
+.release-venv/bin/python bench/test_benchmark.py
+.release-venv/bin/python bench/longmemeval.py --selftest
 
-# 3. Tag the commit
-git tag v$(grep -E '^version = ' pyproject.toml | cut -d'"' -f2)
-git push origin --tags
-
-# 4. Build artifacts (wheel + sdist) in a clean venv
-rm -rf dist build *.egg-info
-python3 -m venv /tmp/release-venv
-/tmp/release-venv/bin/pip install --quiet --upgrade pip build twine
-/tmp/release-venv/bin/python3 -m build
-
-# 5. Sanity-check the artifacts
-/tmp/release-venv/bin/python3 -m twine check dist/*
-
-# 6. Test-install from the wheel in a separate clean venv
-rm -rf /tmp/install-test
-python3 -m venv /tmp/install-test
-/tmp/install-test/bin/pip install dist/mnemosyne_harness-*.whl
-/tmp/install-test/bin/mnemosyne-resolver check    # should pass clean
-/tmp/install-test/bin/python3 -c "
-from mnemosyne_brain import Brain
-from mnemosyne_resolver import check_resolvable
-from mnemosyne_avatar import compute_state
-print('imports OK')"
-
-# 7. Upload to TestPyPI first (catches metadata bugs without burning the prod name)
-/tmp/release-venv/bin/python3 -m twine upload --repository testpypi dist/*
-pip install --index-url https://test.pypi.org/simple/ --no-deps mnemosyne-harness
-
-# 8. Upload to PyPI proper
-/tmp/release-venv/bin/python3 -m twine upload dist/*
-
-# 9. Create a GitHub release
-gh release create v0.3.5 \
-    --title "v0.3.5 — routing-layer audit" \
-    --notes-file <(awk '/^## \[0.3.5\]/,/^## \[0.3.4\]/' CHANGELOG.md | head -n -1) \
-    dist/mnemosyne_harness-0.3.5*
-
-# 10. Verify pip install mnemosyne-harness picks up the new version
-pip install --upgrade mnemosyne-harness
-mnemosyne-resolver check
+rm -rf -- build dist ./*.egg-info
+.release-venv/bin/python -m build
+.release-venv/bin/python -m twine check ./dist/*
 ```
 
-## What ships in the artifact
+Run the Hermes compatibility gate with Python 3.11+ and an exact Hermes Agent
+v0.21.4 checkout:
 
-| Path | Why |
-|---|---|
-| `mnemosyne_*.py` (~22 modules) | core library |
-| `harness_*.py`, `scenario_runner.py` | observability substrate |
-| `obsidian_search.py`, `notion_search.py` | bundled skills |
-| `environment_snapshot.py` | first-turn context tool |
-| `mnemosyne_ui/` package + `static/*` assets | dashboard |
-| `scenarios.example.jsonl` | example evals |
-| `LICENSE`, `README.md` | metadata |
-| 21 console scripts | via `[project.scripts]` |
+```sh
+python3 tests/test_hermes_compat.py \
+  --hermes-root /path/to/hermes-agent-v0.21.4
+```
 
-`scenarios/jailbreak.jsonl`, `examples/`, `tests/`, `docs/` are NOT shipped
-in the wheel — they're development artifacts. Users get them by cloning
-the repo.
+## Wheel-install verification
+
+```sh
+python3 -m venv .wheel-venv
+.wheel-venv/bin/python -m pip install dist/mnemosyne_harness-0.9.8-py3-none-any.whl
+.wheel-venv/bin/python -c '
+from importlib.metadata import entry_points, version
+assert version("mnemosyne-harness") == "0.9.8"
+eps = entry_points(group="hermes_agent.memory_providers")
+ep = next(ep for ep in eps if ep.name == "mnemosyne")
+assert callable(ep.load())
+print("wheel + Hermes entry point OK")
+'
+.wheel-venv/bin/mnemosyne-memory --help >/dev/null
+```
+
+Inspect wheel contents and confirm these are present:
+
+- `integrations/hermes/__init__.py`
+- `integrations/hermes/plugin.yaml`
+- `integrations/hermes/README.md`
+- `mnemosyne_memory.py`
+- UI static assets
+
+Do not commit `dist/`, `build/`, virtual environments, raw benchmark reports,
+or datasets.
+
+## Public-safety checks
+
+```sh
+git diff --check
+git status --short
+git grep -nE 'pip(3)? install mnemosyne-harness|pypi\.org/project/mnemosyne-harness'
+python3 -c "import json; from bench.sanitize_results import assert_aggregate_only; assert_aggregate_only(json.load(open('docs/benchmark-results/2026-06-11-locomo-retrieval-track.json')))"
+```
+
+Review the grep output. Historical changelog discussion may mention planned
+PyPI work, but current installation instructions must use a GitHub tag/release
+asset. Public benchmark artifacts must be aggregate-only and contain no dataset
+questions, expected answers, generated responses, or per-question records.
+
+## Cut the GitHub release (maintainer only)
+
+After all local gates pass and the release commit is on the default branch:
+
+```sh
+git tag -s v0.9.8 -m "Mnemosyne v0.9.8"
+git push origin v0.9.8
+```
+
+Create the GitHub release from tag `v0.9.8` and attach:
+
+- `dist/mnemosyne_harness-0.9.8-py3-none-any.whl`
+- `dist/mnemosyne_harness-0.9.8.tar.gz`
+- checksums generated from those exact files
+
+This repository task does **not** perform those remote operations.
+
+## User installation
+
+Source tag:
+
+```sh
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"
+```
+
+After the GitHub release asset exists, users may install its wheel URL directly:
+
+```sh
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/releases/download/v0.9.8/mnemosyne_harness-0.9.8-py3-none-any.whl"
+```
 
 ## Rollback
 
-If a release is broken, yank it from PyPI:
-
-```sh
-twine yank mnemosyne-harness 0.3.5 --reason "broken UI assets"
-```
-
-Yanked versions aren't installed by `pip install mnemosyne-harness` but
-remain installable by exact pin (`==0.3.5`) so users with that version
-pinned aren't forced to upgrade.
+GitHub releases and tags are immutable release evidence. If v0.9.8 is broken,
+mark the release as affected, publish a fixed patch version, and update current
+documentation. Do not replace an existing asset or move the tag.

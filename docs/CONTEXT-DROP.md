@@ -21,7 +21,8 @@ I'm building **Mnemosyne**, a local-first AI agent framework. GitHub:
 `atxgreene/Mnemosyne`. Current development branch:
 `claude/setup-mnemosyne-consciousness-NZqQE`.
 
-Mnemosyne is a Python package (`pip install mnemosyne-harness`) that
+Mnemosyne is a Python package (install the v0.9.8 GitHub source tag; see
+`docs/QUICKSTART.md`) that
 gives a local LLM persistent memory, stable identity across model
 swaps, learned user-pattern intuition, observable self-regulation,
 and a closed loop for self-improvement. **Stdlib-only core.** Zero

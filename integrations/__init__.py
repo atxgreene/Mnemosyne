@@ -1,0 +1,1 @@
+"""Installable integrations shipped with Mnemosyne."""

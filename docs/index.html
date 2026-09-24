@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mnemosyne — Cognitive OS for Local-First AI Agents</title>
-<meta name="description" content="A drop-in memory provider for Hermes Agent. Stdlib-only core, 6-tier ICMS memory, runtime-validated, eval-gated benchmarks. One pip install away.">
+<meta name="description" content="A drop-in memory provider for Hermes Agent. Stdlib-only core, 6-tier ICMS memory, runtime-validated, and installable from GitHub.">
 <meta property="og:title" content="Mnemosyne — Cognitive OS for Local-First AI Agents">
 <meta property="og:description" content="Drop-in memory provider for Hermes Agent. Stdlib-only. 6-tier ICMS. Runtime-validated. Eval-gated benchmarks.">
 <meta property="og:type" content="website">
@@ -298,16 +298,16 @@
     <div class="kicker">Local-First <span class="tick">·</span> Stdlib-Only <span class="tick">·</span> Hermes-Validated</div>
     <h1 class="title">Mnemosyne</h1>
     <div class="tagline">A Cognitive OS for Local-First AI Agents</div>
-    <p class="subtag">A drop-in <b>memory provider for Hermes Agent</b> with a six-tier cognitive memory model, a four-layer identity lock, and offline dream consolidation. <b>Zero runtime dependencies.</b> One <code>pip install</code> away.</p>
+    <p class="subtag">A drop-in <b>memory provider for Hermes Agent</b> with a six-tier cognitive memory model, a four-layer identity lock, and offline dream consolidation. <b>Zero runtime dependencies.</b> Install from a reviewed GitHub release or source tag.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="#install">▸ pip install mnemosyne-harness</a>
+      <a class="btn btn-primary" href="#install">▸ Install from GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/atxgreene/Mnemosyne" target="_blank" rel="noopener">View on GitHub ↗</a>
     </div>
     <div class="hero-chips">
       <span class="chip"><b>0</b> runtime deps</span>
       <span class="chip"><b>19</b> model providers</span>
       <span class="chip"><b>6</b>-tier ICMS memory</span>
-      <span class="chip"><b>8/8</b> Hermes checks PASS</span>
+      <span class="chip"><b>PASS</b> Hermes compatibility gate</span>
     </div>
   </div>
   <div class="scroll-hint">scroll ↓</div>
@@ -351,9 +351,9 @@
 
     <div class="bench-grid">
       <div class="stat">
-        <span class="num green" data-count="8" data-suffix="/8">0/8</span>
-        <div class="label">Hermes runtime checks PASS</div>
-        <div class="sub">Live Hermes v0.16.0 — discovery, routing, persistence, fresh-session recall.</div>
+        <span class="num green">PASS</span>
+        <div class="label">Hermes compatibility gate</div>
+        <div class="sub">Hermes v0.21.4 — discovery, loading, routing, persistence, and clean shutdown.</div>
       </div>
       <div class="stat">
         <span class="num teal" data-count="0.8704" data-dec="4">0.0000</span>
@@ -361,9 +361,9 @@
         <div class="sub">Deterministic probe set — recall@5 / MRR / hit@1 by category.</div>
       </div>
       <div class="stat">
-        <span class="num gold" data-count="0.6247" data-dec="4">0.0000</span>
-        <div class="label">LOCOMO retrieval track</div>
-        <div class="sub"><b>1,540</b> scored questions · 2.2–2.5× recency/random baselines · snap-research/locomo.</div>
+        <span class="num gold" data-count="0.5009" data-dec="4">0.0000</span>
+        <div class="label">LOCOMO evidence recall@8</div>
+        <div class="sub"><b>1,536</b> questions with gold dialogue IDs · judge-free retrieval metric · snap-research/locomo.</div>
       </div>
       <div class="stat">
         <span class="num teal" data-count="0.96" data-dec="2">0.00</span>
@@ -405,15 +405,15 @@
 
     <div class="hermes-grid">
       <div class="terminal" id="hermesTerm">
-        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">hermes · v0.16.0 · runtime validation</span></div>
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">hermes · v0.21.4 · runtime validation</span></div>
         <div class="term-body" id="termBody"></div>
       </div>
       <div class="hermes-copy">
         <h3>Three tools. Zero ceremony.</h3>
-        <p>Turns persist automatically through a single-writer SQLite queue — the agent loop is never blocked. Session-end hooks run salient extraction, writing facts, preferences, and goals up-tier.</p>
+        <p>Primary-context turns persist automatically through a single-writer SQLite queue. Explicit model writes are constrained to non-identity memory in tiers L2–L4.</p>
         <table class="tool-table">
           <tr><td>memory_search(query, limit)</td><td>FTS5 BM25 + strength-weighted retrieval across all tiers</td></tr>
-          <tr><td>memory_write(content, kind, tier)</td><td>store fact / preference / goal / pattern at tier 2–5</td></tr>
+          <tr><td>memory_write(content, kind, tier)</td><td>store fact / preference / goal / pattern in tiers L2–L4</td></tr>
           <tr><td>memory_stats()</td><td>direct SQLite per-tier row counts</td></tr>
         </table>
         <div class="badge-row">
@@ -548,14 +548,14 @@
     <h2>Ten lines to a first conversation.</h2>
     <div class="install-box">
       <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">bash · ~/projects/mnemosyne</span></div>
-      <div class="code"><span class="c"># zero runtime deps — this pulls nothing from PyPI</span>
-<span class="p">$</span> <span class="k">pip install</span> mnemosyne-harness
+      <div class="code"><span class="c"># Mnemosyne is not on PyPI; install the v0.9.8 source tag</span>
+<span class="p">$</span> <span class="k">python3 -m pip install</span> https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz
 <span class="p">$</span> <span class="k">mnemosyne-serve</span> &amp;                      <span class="c"># daemon + dashboard</span>
 <span class="p">$</span> <span class="k">open</span> http://127.0.0.1:8484/ui          <span class="c"># avatar evolves in real time</span>
 
-<span class="c"># or drop it into Hermes as a memory provider:</span>
-<span class="p">$</span> <span class="k">hermes plugins enable</span> mnemosyne
-<span class="p">$</span> <span class="k">hermes plugins list</span>     <span class="o">→ enabled  user  0.1.0  mnemosyne</span></div>
+<span class="c"># select the installed memory-provider entry point in Hermes:</span>
+<span class="p">$</span> <span class="k">hermes config set</span> memory.provider mnemosyne
+<span class="p">$</span> <span class="k">hermes memory status</span>    <span class="o">→ provider: mnemosyne</span></div>
     </div>
     <div class="verify-row">
       <span class="chip">Verify: <b>python3 tests/test_all.py</b></span>
@@ -661,18 +661,16 @@ document.querySelectorAll('.stat .num[data-count]').forEach(el=>co.observe(el));
   const body=document.getElementById('termBody');
   if(!term||!body) return;
   const lines=[
-    {t:'<span class="term-cmd"><span class="pr">$</span> hermes plugins enable mnemosyne</span>',d:380},
-    {t:'<span class="term-dim">→ discovering memory providers…</span>',d:320},
-    {t:'<span class="term-check">  plugin discovery             </span><span class="term-pass">PASS</span>',d:260},
+    {t:'<span class="term-cmd"><span class="pr">$</span> hermes config set memory.provider mnemosyne</span>',d:380},
+    {t:'<span class="term-dim">→ selecting installed memory-provider entry point…</span>',d:320},
+    {t:'<span class="term-check">  provider discovery           </span><span class="term-pass">PASS</span>',d:260},
     {t:'<span class="term-check">  provider load + availability </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-check">  session initialization       </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-check">  tool routing · write/search  </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-check">  turn persistence → SQLite    </span><span class="term-pass">PASS</span>',d:230},
-    {t:'<span class="term-check">  prefetch (non-blocking)      </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-check">  shutdown / queue flush       </span><span class="term-pass">PASS</span>',d:230},
-    {t:'<span class="term-check">  fresh-session recall         </span><span class="term-pass">PASS</span>',d:230},
     {t:'<span class="term-dim">&nbsp;</span>',d:160},
-    {t:'<span class="term-pass">  ✓ 8/8 checks passed</span> <span class="term-dim">— live Hermes v0.16.0</span>',d:300},
+    {t:'<span class="term-pass">  ✓ compatibility gate passed</span> <span class="term-dim">— Hermes v0.21.4</span>',d:300},
   ];
   let started=false;
   function run(){

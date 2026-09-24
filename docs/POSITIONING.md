@@ -55,7 +55,7 @@
 
 - You have an existing eternal-context or fantastic-disco deployment and want deployment + observability tooling that speaks the same ICMS/consciousness language.
 - You care more about *optimizing* an agent (sweep + Pareto + scenarios) than about *running* one (dashboards + alerts).
-- You want a zero-dep, local-first, pip-installable stack that works on WSL2 without network access.
+- You want a zero-dependency, local-first stack installable from a reviewed GitHub source tag.
 - You're interested in the consciousness/meta-harness research direction.
 
 ## When to use Hermes Agent instead

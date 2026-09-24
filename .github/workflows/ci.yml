@@ -1,198 +1,258 @@
-# ==============================================================================
-#  Mnemosyne CI — the six-phase pipeline, adapted for a zero-dep local-agent repo.
-#
-#  Phases: Verify → Unit → Integration → Shellcheck → Install-smoke → Triage-demo
-#  Every phase is a separate job so failure localizes quickly in the UI.
-#  No manual overrides. No deploy step — this is a library, not a service.
-#
-#  Runs on: every push to main, every PR, weekly cron (catches cron/time drift).
-#
-#  Zero runtime dependencies beyond stdlib + shellcheck + pyflakes, so the CI
-#  matches what users actually install.
-# ==============================================================================
-
 name: CI
 
 on:
   push:
-    branches: ["main", "claude/**"]
+    branches: ["main", "claude/**", "release/**"]
   pull_request:
     branches: ["main"]
   schedule:
-    - cron: "0 12 * * 1"   # weekly sanity run, Mondays 12:00 UTC
+    - cron: "0 12 * * 1"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  HERMES_AGENT_REPOSITORY: https://github.com/NousResearch/hermes-agent.git
+  # Verified from the v0.21.4 pyproject and checked out immutably.
+  HERMES_AGENT_V0214_COMMIT: d3b25b52ad1318c526bdb259b600eeca3d5f38e6
+
 jobs:
-  # ─── Phase 1 ───────────────────────────────────────────────────────────────
   verify:
-    name: verify (syntax + pyflakes)
+    name: syntax, pyflakes, and public claims
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - name: Syntax check every .py
-        run: |
-          for f in *.py examples/*.py tests/*.py; do
-            python3 -c "import ast; ast.parse(open('$f').read())" \
-              || { echo "SYNTAX FAIL: $f"; exit 1; }
-          done
-          echo "all python files parse clean"
-      - name: pyflakes
-        run: |
-          python3 -m pip install --quiet pyflakes
-          python3 -m pyflakes *.py examples/*.py tests/*.py
+      - run: python3 -m compileall -q .
+      - run: |
+          python3 -m pip install --quiet "pyflakes==3.4.0"
+          python3 -m pyflakes \
+            ./*.py ./examples/*.py ./tests/*.py ./bench/*.py ./integrations/*.py \
+            ./integrations/hermes/*.py
+      - name: Enforce current public and release claims
+        run: python3 tests/test_release_contracts.py
 
-  # ─── Phase 2 ───────────────────────────────────────────────────────────────
+  unit:
+    name: unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python3 tests/test_all.py
+
+  provider:
+    name: Hermes provider standalone contract
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - run: python3 tests/test_hermes_provider.py
+
+  hermes-v0214:
+    name: wheel discovery/load on Hermes Agent v0.21.4
+    runs-on: ubuntu-latest
+    needs: provider
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Checkout immutable Hermes compatibility reference
+        run: |
+          git init --quiet /tmp/hermes-agent
+          git -C /tmp/hermes-agent remote add origin "$HERMES_AGENT_REPOSITORY"
+          git -C /tmp/hermes-agent fetch --depth=1 origin "$HERMES_AGENT_V0214_COMMIT"
+          git -C /tmp/hermes-agent checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/hermes-agent rev-parse HEAD)" = "$HERMES_AGENT_V0214_COMMIT"
+          python3 - <<'PY'
+          import tomllib
+          with open('/tmp/hermes-agent/pyproject.toml', 'rb') as handle:
+              assert tomllib.load(handle)['project']['version'] == '0.21.4'
+          PY
+      - name: Build wheel and install it with exact Hermes
+        run: |
+          python3 -m pip install --quiet "build==1.3.0"
+          rm -rf -- build dist ./*.egg-info
+          python3 -m build --wheel
+          python3 -m venv /tmp/mnemosyne-hermes-wheel
+          /tmp/mnemosyne-hermes-wheel/bin/python -m pip install --quiet \
+            -e /tmp/hermes-agent ./dist/*.whl
+      - name: Discover and load installed wheel through Hermes
+        env:
+          HERMES_HOME: /tmp/mnemosyne-hermes-home
+          MNEMOSYNE_PATH: ""
+        run: |
+          mkdir -p "$HERMES_HOME"
+          cd /tmp
+          /tmp/mnemosyne-hermes-wheel/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import hermes_cli
+          from plugins.memory import list_memory_provider_names, load_memory_provider
+
+          assert hermes_cli.__version__ == "0.21.4", hermes_cli.__version__
+          assert "mnemosyne" in list_memory_provider_names()
+          provider = load_memory_provider("mnemosyne", register_skills=False)
+          assert provider is not None
+          assert provider.name == "mnemosyne"
+          assert provider.__class__.__module__.startswith("_hermes_user_memory.")
+          provider.initialize(
+              "wheel-discovery-session",
+              hermes_home=str(Path("/tmp/mnemosyne-hermes-home")),
+              platform="cli",
+              agent_context="primary",
+          )
+          try:
+              stored = json.loads(provider.handle_tool_call(
+                  "memory_write",
+                  {"content": "synthetic wheel discovery marker", "kind": "fact", "tier": 2},
+              ))
+              assert stored["stored"] is True, stored
+          finally:
+              provider.shutdown()
+          print("Hermes 0.21.4 discovered and loaded the installed Mnemosyne wheel")
+          PY
+
+  benchmark:
+    name: benchmark regressions and sanitized artifacts
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - run: python3 bench/test_benchmark.py
+      - run: python3 bench/longmemeval.py --selftest
+      - name: Validate every checked-in LOCOMO artifact is aggregate-only
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from bench.sanitize_results import assert_aggregate_only
+          for path in sorted(Path("docs/benchmark-results").glob("*locomo*.json")):
+              assert_aggregate_only(json.loads(path.read_text()))
+              print(f"aggregate-only: {path}")
+          PY
+
+  harness:
+    name: integration harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - run: /bin/bash test-harness.sh
+      - run: /bin/bash install-mnemosyne.sh --self-test-portable-edit
+
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
-      - name: Lint every shell script
-        run: shellcheck -x *.sh
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - run: shellcheck -x ./*.sh
 
-  # ─── Phase 3 ───────────────────────────────────────────────────────────────
-  unit:
-    name: unit tests
+  package:
+    name: build, twine, wheel install, and provider entry point
     runs-on: ubuntu-latest
-    needs: [verify]
+    needs: [unit, provider, hermes-v0214, benchmark, harness, shellcheck]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - run: python3 tests/test_all.py
-
-  # ─── Phase 4 ───────────────────────────────────────────────────────────────
-  integration:
-    name: integration test-harness
-    runs-on: ubuntu-latest
-    needs: [shellcheck]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: bash test-harness.sh
-
-  # ─── Phase 5 ───────────────────────────────────────────────────────────────
-  install-smoke:
-    name: pip install -e . smoke test
-    runs-on: ubuntu-latest
-    needs: [unit, integration]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install package
+      - name: Build and validate distributions
         run: |
-          python3 -m venv /tmp/ci-venv
-          /tmp/ci-venv/bin/pip install --quiet --upgrade pip
-          /tmp/ci-venv/bin/pip install -e .
-      - name: Verify all 25 entry points land on $PATH
+          python3 -m pip install --quiet "build==1.3.0" "twine==6.2.0"
+          rm -rf -- build dist ./*.egg-info
+          python3 -m build
+          python3 -m twine check ./dist/*
+      - name: Install wheel into a clean environment
         run: |
-          # Stable v0.2.x surface
-          for cmd in mnemosyne-experiments mnemosyne-pipeline \
-                    mnemosyne-models mnemosyne-memory \
-                    environment-snapshot obsidian-search notion-search \
-                    harness-telemetry mnemosyne-triage; do
-            [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
-          done
-          # v0.2.0+ rigor pass + v0.3.x UI / resolver + v0.5.0 adapter
-          # + v0.7.0 compactor & continuity + v0.8.0 instinct
-          for cmd in mnemosyne-proposer mnemosyne-dreams mnemosyne-apply \
-                    mnemosyne-scengen mnemosyne-goals mnemosyne-mcp \
-                    mnemosyne-serve mnemosyne-train mnemosyne-batch \
-                    mnemosyne-datagen mnemosyne-avatar mnemosyne-resolver \
-                    mnemosyne-adapter-claude-code \
-                    mnemosyne-compactor mnemosyne-continuity \
-                    mnemosyne-instinct; do
-            [ -x "/tmp/ci-venv/bin/$cmd" ] || { echo "MISSING: $cmd"; exit 1; }
-          done
-          echo "all 25 entry points installed"
-      - name: Verify library imports without sys.path shims
+          python3 -m venv /tmp/mnemosyne-wheel
+          /tmp/mnemosyne-wheel/bin/python -m pip install --quiet ./dist/*.whl
+      - name: Validate metadata, resources, and provider entry point
         run: |
-          /tmp/ci-venv/bin/python3 -c "
-          from harness_telemetry import TelemetrySession, create_run, finalize_run
-          from mnemosyne_brain import Brain, BrainConfig
-          from mnemosyne_memory import MemoryStore, L1_HOT, L2_WARM, L3_COLD
-          from mnemosyne_models import Backend, from_env, detect_providers
-          from mnemosyne_skills import SkillRegistry, record_learned_skill
-          from mnemosyne_identity import enforce_identity, MNEMOSYNE_IDENTITY
-          from mnemosyne_triage import run_triage, write_markdown_report
-          # v0.2.x+ library surfaces
-          from mnemosyne_proposer import propose
-          from mnemosyne_dreams import consolidate
-          from mnemosyne_inner import deliberate, DEFAULT_TRIGGER_TAGS
-          from mnemosyne_apply import apply_proposal, apply_all_accepted
-          from mnemosyne_goals import GoalStack, goals_system_block
-          from mnemosyne_avatar import compute_state, render_svg
-          from mnemosyne_batch import run_batch, Prompt
-          from mnemosyne_datagen import generate_prompts, expand_template
-          from mnemosyne_train import export, compress_one, deploy
-          from mnemosyne_tool_parsers import parse_any, strip_tool_calls
-          from mnemosyne_skills_builtin import register_builtin_skills
-          from mnemosyne_mcp import MCPClient, serve_stdio
-          from mnemosyne_resolver import check_resolvable, ResolverReport
-          from mnemosyne_permissions import Permissions, parse, load
-          from mnemosyne_adapter_claude_code import install, uninstall, status
-          from mnemosyne_predictions import predict, observe, score_events, calibration_trait
-          # v0.7.0 library surfaces
-          from mnemosyne_memory import L4_PATTERN, L5_IDENTITY, KIND_DECAY_MULTIPLIERS
-          from mnemosyne_compactor import compact_patterns, audit_patterns
-          from mnemosyne_continuity import load_scenarios, run_continuity, judge_response
-          # v0.8.0 library surfaces
-          from mnemosyne_instinct import distill, list_instincts, clear_instincts
-          # v0.9.0 — Instinct promoted to its own L0 tier
-          from mnemosyne_memory import L0_INSTINCT
-          assert L0_INSTINCT == 0, L0_INSTINCT
-          print('all 28+ library surfaces import cleanly (incl. L0_INSTINCT)')
-          "
-      - name: Verify UI static assets ship with the package
-        run: |
-          /tmp/ci-venv/bin/python3 -c "
+          cd /tmp
+          /tmp/mnemosyne-wheel/bin/python - <<'PY'
+          from importlib.metadata import entry_points, version
+          from importlib.resources import files
           from pathlib import Path
-          import mnemosyne_serve as ms
-          ui = Path(ms.__file__).resolve().parent / 'mnemosyne_ui' / 'static'
-          for f in ('index.html', 'app.js', 'avatar.js', 'style.css'):
-              assert (ui / f).is_file(), f'missing UI asset: {f}'
-          print('all 4 UI assets ship with the package')
-          "
-
-  # ─── Phase 6 ───────────────────────────────────────────────────────────────
-  triage-demo:
-    name: triage engine dry-run
-    runs-on: ubuntu-latest
-    needs: [install-smoke]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Seed a fake PROJECTS_DIR + run triage
+          import sys
+          assert version("mnemosyne-harness") == "0.9.8"
+          providers = entry_points(group="hermes_agent.memory_providers")
+          provider = next(ep for ep in providers if ep.name == "mnemosyne")
+          assert callable(provider.load())
+          resources = files("integrations.hermes")
+          for name in ("plugin.yaml", "README.md"):
+              assert resources.joinpath(name).is_file(), name
+          fixture = Path(sys.prefix) / "share/mnemosyne/scenarios.example.jsonl"
+          assert fixture.is_file(), fixture
+          print("wheel metadata/resources/provider entry point OK")
+          PY
+          /tmp/mnemosyne-wheel/bin/mnemosyne-memory --help >/dev/null
+      - name: Inspect wheel contents
         run: |
-          export MNEMOSYNE_PROJECTS_DIR=/tmp/ci-projects
-          mkdir -p "$MNEMOSYNE_PROJECTS_DIR"
-          python3 -c "
-          import os
-          os.environ.setdefault('MNEMOSYNE_PROJECTS_DIR', '/tmp/ci-projects')
-          import harness_telemetry as ht
-          rid = ht.create_run(model='ci:test', tags=['ci'], slug='dryrun')
-          with ht.TelemetrySession(rid) as s:
-              s.log('tool_call', tool='x', status='ok', duration_ms=10.0)
-              s.log('tool_call', tool='y', status='error',
-                    error={'type': 'CIError', 'message': 'synthetic'})
-          ht.finalize_run(rid, metrics={'accuracy': 0.9})
-          "
-          python3 mnemosyne_triage.py scan --window-days 30
-          test -f /tmp/ci-projects/health/$(date -u +%Y-%m-%d).md
-          echo "triage produced a valid health report"
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          wheel = next(Path("dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          required = {
+              "integrations/hermes/__init__.py",
+              "integrations/hermes/plugin.yaml",
+              "integrations/hermes/README.md",
+              "mnemosyne_memory.py",
+          }
+          missing = sorted(required - names)
+          assert not missing, missing
+          assert not any("test_" in name for name in names), sorted(names)
+          integration_paths = {
+              name for name in names if name.startswith("integrations/")
+          }
+          assert integration_paths <= required | {"integrations/__init__.py"}, integration_paths
+          assert any(name.endswith("share/mnemosyne/scenarios.example.jsonl") for name in names)
+          print(f"wheel contents OK: {wheel.name}")
+          PY

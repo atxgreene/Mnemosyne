@@ -26,8 +26,8 @@ Tracks reported per run (all in the output JSON):
     rows (LongMemEval's standard memory-recall metric; judge-free);
   * turn-level retrieval recall@k — fraction of `has_answer` turns
     retrieved (judge-free);
-  * answer-in-context / answer accuracy by question_type (substring
-    judge lower bound, or OpenAI LLM-as-judge), with abstention
+  * deterministic lexical answer coverage by question_type (or OpenAI
+    LLM-as-judge), explicitly not labeled answer accuracy, with abstention
     (`*_abs`) questions scored only in --llm-grounded mode;
   * latency p50/p95, token estimates, ingest throughput, cost.
 
@@ -80,7 +80,7 @@ from locomo import (  # noqa: E402
     _make_token_counter,
     _openai_judge,
     _pctl,
-    _substring_judge,
+    _answer_coverage_judge,
 )
 
 _DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -251,7 +251,7 @@ class MnemosyneLMESubstrate:
 def run(substrate: MnemosyneLMESubstrate,
         instances: list[dict[str, Any]],
         *,
-        judge: str = "substring",
+        judge: str = "answer_coverage",
         judge_model: str = "gpt-4o-mini",
         llm_grounded: bool = False,
         on_progress: Callable[[int, int, dict[str, Any]], None] | None = None,
@@ -259,8 +259,8 @@ def run(substrate: MnemosyneLMESubstrate,
     """Per question: ingest haystack, probe, judge, score retrieval.
 
     Scoring protocol:
-      * non-abstention questions: judge(expected, response); headline
-        `score` covers these. Abstention questions (`question_id`
+      * non-abstention questions: judge(expected, response); deterministic
+        lexical coverage is not answer accuracy. Abstention questions (`question_id`
         ending `_abs`) are scored via abstention detection only in
         --llm-grounded mode, reported separately.
       * session recall@k / turn recall@k: judge-free; gold
@@ -322,7 +322,7 @@ def run(substrate: MnemosyneLMESubstrate,
                 passed = False
                 actual += f" [judge error: {e}]"
         else:
-            passed = _substring_judge(question, expected, actual)
+            passed = _answer_coverage_judge(question, expected, actual)
 
         result = {
             "question_id": qid,
@@ -378,9 +378,16 @@ def run(substrate: MnemosyneLMESubstrate,
     ctx_tokens = [r["context_tokens_est"] for r in per_question]
 
     return {
-        "score": round(passed_n / total, 4) if total else 0.0,
-        "passed": passed_n,
-        "total": total,
+        "answer_coverage": {
+            "rate": round(passed_n / total, 4) if total else 0.0,
+            "passed": passed_n,
+            "total": total,
+            "metric": (
+                "openai_llm_judge" if judge == "openai"
+                else "deterministic_lexical_coverage"
+            ),
+            "is_answer_accuracy": False,
+        },
         "abstention": {
             "total": len(abst),
             "scored": len(abst_scored),
@@ -393,7 +400,7 @@ def run(substrate: MnemosyneLMESubstrate,
         },
         "by_question_type": {
             t: {"total": v["total"], "passed": v["passed"],
-                "score": round(v["passed"] / v["total"], 4),
+                "coverage_rate": round(v["passed"] / v["total"], 4),
                 "session_recall_mean": (round(statistics.fmean(
                     v["session_recall"]), 4) if v["session_recall"] else None),
                 "turn_recall_mean": (round(statistics.fmean(
@@ -517,14 +524,14 @@ def _selftest() -> int:
         nonlocal ok
         print(f"  {'PASS' if cond else 'FAIL'}  {name}")
         ok = ok and cond
-    check("answerable questions scored", report["total"] == 2)
+    check("answerable questions scored", report["answer_coverage"]["total"] == 2)
     check("abstention split out", report["abstention"]["total"] == 1
           and report["abstention"]["scored"] == 0)
     check("evidence retrieved (session recall = 1.0)",
           report["session_recall"]["mean"] == 1.0)
     check("turn recall computed", report["turn_recall"]["mean"] is not None
           and report["turn_recall"]["mean"] > 0)
-    check("answers found in context", report["score"] == 1.0)
+    check("answers found in context", report["answer_coverage"]["rate"] == 1.0)
     check("latency recorded", report["latency"]["search"]["n"] == 3)
     check("ingest counted", report["ingest"]["turns_total"] > 0)
     print(f"[longmemeval] selftest {'PASSED' if ok else 'FAILED'}")
@@ -550,8 +557,8 @@ def _main(argv: list[str] | None = None) -> int:
     p.add_argument("--llm-grounded", action="store_true")
     p.add_argument("--provider", default=None)
     p.add_argument("--model", default=None)
-    p.add_argument("--judge", choices=("substring", "openai"),
-                   default="substring")
+    p.add_argument("--judge", choices=("answer_coverage", "openai"),
+                   default="answer_coverage")
     p.add_argument("--judge-model", default="gpt-4o-mini")
     p.add_argument("--out", default="bench/results/longmemeval.json")
     p.add_argument("--db-path", default="/tmp/longmemeval-mnemo.db")

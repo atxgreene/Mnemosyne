@@ -115,7 +115,7 @@ When the cognitive-OS checklist reads ✓ across all five rows:
 
 1. `docs/COGNITIVE_OS.md` gets the green banner at the top.
 2. README tagline upgrades from "substrate" → "OS".
-3. We cut v1.0.0 and publish to PyPI without qualifiers.
+3. We cut v1.0.0 as a signed GitHub release with verified wheel/source assets.
 4. Article gets a follow-up: "We now meet the operational definition
    of a cognitive OS. Here's the evidence."
 5. We don't stop. The bar just shifts: next target is

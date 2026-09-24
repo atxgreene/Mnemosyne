@@ -1,112 +1,96 @@
-# Mnemosyne — Hermes Memory Provider Plugin
+# Mnemosyne memory provider for Hermes Agent
 
-Local-first, privacy-preserving persistent memory for the Hermes Agent
-(Nous Research). Backed by Mnemosyne's 6-tier SQLite ICMS (Integrated
-Cognitive Memory System).
+Mnemosyne v0.9.8 includes a packaged memory provider targeting Hermes Agent
+v0.21.4. It stores data locally in SQLite and adds no runtime dependency.
 
-## What it does
+## Security boundary
 
-- Persists every conversation turn to a local SQLite database (FTS5 search).
-- Exposes three agent tools: `memory_search`, `memory_write`, `memory_stats`.
-- Injects a `prefetch` context block before each turn (async, non-blocking).
-- On session end / pre-compression: extracts facts, preferences, goals, and
-  patterns from the transcript and promotes them to higher ICMS tiers.
-- No cloud, no API key, no external service required.
+The model-callable `memory_write` tool accepts `fact`, `preference`, `goal`, and
+`pattern` in tiers L2-L4. It rejects L0 instinct, L1 working-memory, L5, and
+identity writes in both the JSON schema and the handler. Trusted application code can still write L5 through
+`mnemosyne_memory.MemoryStore` for reviewed identity workflows.
 
-## Setup
+Automatic turn writes run only when Hermes initializes the provider with
+`agent_context="primary"`. Explicit tool calls remain available in other
+contexts, subject to the L2-L4 restriction. No standalone session-extraction
+capability is claimed by the public package.
 
-### 1. Install Mnemosyne
+## Install
 
-```bash
-git clone https://github.com/atxgreene/Mnemosyne ~/Mnemosyne
-export MNEMOSYNE_PATH=~/Mnemosyne
+Mnemosyne is not published on PyPI. Install v0.9.8 from the GitHub source tag
+with the same Python environment that runs Hermes:
+
+```sh
+python3 -m pip install \
+  "https://github.com/atxgreene/Mnemosyne/archive/refs/tags/v0.9.8.tar.gz"
 ```
 
-### 2. Drop into Hermes
+The wheel/source install registers the `mnemosyne` entry point in
+`hermes_agent.memory_providers`; no plugin-directory copy is required. A source
+checkout also works by copying `integrations/hermes/` to
+`$HERMES_HOME/plugins/mnemosyne/` and setting `MNEMOSYNE_PATH` to the checkout.
 
-```bash
-cp -r experiments/hermes_plugin/mnemosyne \
-      /path/to/hermes-agent/plugins/memory/mnemosyne
-```
+Configure Hermes:
 
-### 3. Configure Hermes
-
-In your Hermes `config.yaml`:
 ```yaml
 memory:
   provider: mnemosyne
 ```
 
 Optional `$HERMES_HOME/mnemosyne.json`:
+
 ```json
 {
-  "db_path": "/home/user/.mnemosyne/hermes.db",
-  "prefetch_limit": 8
+  "db_path": "mnemosyne/memory.db",
+  "prefetch_limit": 8,
+  "mnemosyne_path": "/absolute/path/to/a/source/checkout"
 }
 ```
 
-### 4. Run
+`mnemosyne_path` is unnecessary for a package install. Relative `db_path`
+values are resolved under `HERMES_HOME`. Config writes are atomic and mode 0600
+when the platform permits it.
 
-```bash
-MNEMOSYNE_PATH=~/Mnemosyne hermes chat
+## Tools
+
+| Tool | Contract |
+|---|---|
+| `memory_search(query, limit=8)` | Search all tiers; returns a JSON object. |
+| `memory_write(content, kind, tier)` | Explicit L2-L4 write; L0/L1 and identity/L5 rejected. |
+| `memory_stats()` | Tier/kind counts in a JSON object. |
+
+All handler paths, including validation errors and unknown tools, return JSON
+objects serialized as strings, matching the Hermes v0.21.4 provider contract.
+
+## Lifecycle behavior
+
+- `sync_turn(user, assistant, *, session_id="", messages=None,
+  turn_author=None)` matches the v0.21.4 call signature.
+- Background jobs preserve the submitting turn's context variables and log
+  failures explicitly.
+- Session switches update the default source session and invalidate prefetch
+  caches, including in-flight results from the old generation.
+- Module resolution is dynamic: configured checkout, environment checkout,
+  source tree, then installed `mnemosyne_memory` module.
+- Shutdown drains the single writer and closes SQLite.
+
+## Verify
+
+Standalone contract tests:
+
+```sh
+python3 tests/test_hermes_provider.py
 ```
 
-## Agent tools
+Compatibility test against an actual Hermes v0.21.4 checkout, with a temporary
+isolated `HERMES_HOME`:
 
-| Tool | Description |
-|---|---|
-| `memory_search(query, limit=8)` | FTS5 search across all tiers |
-| `memory_write(content, kind, tier)` | Store a new memory |
-| `memory_stats()` | Tier distribution summary |
-
-`kind` options: `fact`, `preference`, `goal`, `pattern`, `identity`  
-`tier` levels: 2 (event/turn) → 3 (fact) → 4 (pattern) → 5 (identity)
-
-## Running the smoke test
-
-```bash
-MNEMOSYNE_PATH=~/Mnemosyne python3 experiments/hermes_plugin/mnemosyne/test_provider.py
+```sh
+python3 tests/test_hermes_compat.py \
+  --hermes-root /path/to/hermes-agent-v0.21.4
 ```
 
-All checks should pass in under 2 seconds with no network access.
-
-## Retrieval baseline (2026-06-10)
-
-Measured against the eval harness in `experiments/evals/`:
-
-| metric | value |
-|---|---|
-| recall@5 overall | 0.87 |
-| paraphrase recall@5 | 0.625 |
-| LOCOMO retrieval track (1,540 scored q) | 0.6247 |
-| LOCOMO evidence recall@8 | 0.5009 |
-
-(LOCOMO protocol + baselines + token/latency/cost detail:
-[`docs/BENCHMARKS_LOCOMO.md`](../../docs/BENCHMARKS_LOCOMO.md). The
-earlier 0.4849 figure divided the same run by all 1,986 questions
-including 446 adversarial ones that retrieval-only mode cannot pass.)
-
-The paraphrase gap is the primary optimization target: wiring
-`mnemosyne_embeddings.py` into `MemoryStore.search()` with rank fusion
-should lift paraphrase hit@1 from 0.50 to ≥0.75. Gate: run
-`python3 experiments/evals/check_regression.py` before merging any
-retrieval changes.
-
-## Broader application roadmap
-
-**mnemosyne-os ISO** — The mnemosyne-os live-build ISO (separate repo) will
-ship this plugin as the default agent memory backend once the stub Tugboat
-router is replaced with real imports. Estimated 2–4 week project.
-
-**LLM training signal** — The ICMS event log + structured tiers are
-high-quality synthetic training data for memory-augmented LLM fine-tuning
-(Honcho Neuromancer direction). Viable at scale once BEN accumulates
-sufficient real-use events. Requires a data pipeline from `events.jsonl`
-to instruction-tuning pairs.
-
-**AGI trajectory** — The ICMS architecture is well above open-source
-alternatives. The current ceiling is the absence of closed-loop
-self-improvement: the agentic proposer is research-grade, retrieval is
-keyword-only, and routing is rule-based. The eval harness + regression
-gate are the foundation for closing that gap metric by metric. Progress
-will be measured, not assumed.
+The compatibility test verifies Hermes' real `MemoryProvider` ABC and
+`MemoryManager`, package registration shape, tools, JSON results, turn writes,
+session switching/cache reset, and shutdown. It skips cleanly when the checkout
+is absent and fails if the imported Hermes version is not exactly 0.21.4.

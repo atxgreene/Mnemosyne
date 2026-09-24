@@ -86,8 +86,11 @@ def _tmp_projects_dir() -> Path:
 
 @test("redact: flat dict with token key")
 def _():
-    out = ht._redact({"token": "secret_abc", "name": "alice"}, ht.DEFAULT_REDACT_PATTERNS)
-    assert out == {"token": ht.REDACTED, "name": "alice"}, out
+    out = ht._redact(
+        {"token": "secret_abc", "name": "synthetic-subject"},
+        ht.DEFAULT_REDACT_PATTERNS,
+    )
+    assert out == {"token": ht.REDACTED, "name": "synthetic-subject"}, out
 
 
 @test("redact: nested dict redacts at any depth")
@@ -4159,7 +4162,9 @@ def _():
         out = pd / "autobio"
         result = store.export_to_git(out, tier_min=2)
         assert result["count"] == 1
-        assert result["repo"] == str(out)
+        # macOS commonly resolves /tmp to /private/tmp. export_to_git returns
+        # its canonical target path, so compare canonical paths on all OSes.
+        assert Path(result["repo"]) == out.resolve()
         store.close()
     finally:
         shutil.rmtree(pd)

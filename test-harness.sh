@@ -49,6 +49,7 @@ bad() { printf '%s  ✗%s %s\n' "$c_red" "$c_off" "$*"; FAIL=$((FAIL+1)); }
 
 FAKE=$(mktemp -d /tmp/mnemo-harness-test-XXXXXX)
 # shellcheck disable=SC2317  # cleanup() is called via trap, shellcheck can't see that
+# shellcheck disable=SC2329  # invoked indirectly by the EXIT trap
 cleanup() {
   if [ "$KEEP" = 1 ]; then
     echo
@@ -163,7 +164,10 @@ print(run_a)
 print(run_b)
 print(run_c)
 PY
-mapfile -t RUNS < <(python3 -c "
+RUNS=()
+while IFS= read -r run_id; do
+  RUNS[${#RUNS[@]}]="$run_id"
+done < <(python3 -c "
 import os, sys
 sys.path.insert(0, '$SCRIPT_DIR')
 os.environ['MNEMOSYNE_PROJECTS_DIR'] = '$FAKE'
