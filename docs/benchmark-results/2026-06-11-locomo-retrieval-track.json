@@ -15,18 +15,13 @@
     "execution_source_commit": "b73d1c8e4e3a3d77d0d2985027298fc838b5c5c5",
     "first_committed_artifact_commit": "c68949401983dc0f888f3a05019a9acd4eab5447",
     "first_committed_runner_commit": "e6a1db7f76bc8ff8e5e90e28089bc27163cbf460",
-    "historical_reproduction_note": "Checkout c68949401983dc0f888f3a05019a9acd4eab5447, the first commit containing this artifact and its measured runner revision. Its parent b73d1c8e4e3a3d77d0d2985027298fc838b5c5c5 records the source checkout at execution time. Current v0.9.8 uses the hardened answer_coverage judge and emits different metric keys.",
-    "historical_runner": "bench/locomo.py measured revision first committed with the artifact at c68949401983dc0f888f3a05019a9acd4eab5447",
-    "judge_free_primary_metric": "evidence_recall measures gold dialogue-id retrieval and does not use an answer judge.",
-    "metric_notice": "The legacy lexical match values below came from the retired any-one-content-token/phrase judge. They are answer-coverage diagnostics, not answer accuracy, and are not comparable to the hardened v0.9.8 answer_coverage judge.",
-    "reproduction_commit": "c68949401983dc0f888f3a05019a9acd4eab5447",
-    "substrate": "Mnemosyne MemoryStore (SQLite FTS5 BM25 + strength weighting), v0.9.8 runner"
+    "reproduction_commit": "c68949401983dc0f888f3a05019a9acd4eab5447"
   },
   "_provenance": {
     "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
     "dataset_text_included": false,
     "per_question_records_omitted": true,
-    "sanitizer": "bench/sanitize_results.py v1 plus legacy-metric relabel migration",
+    "sanitizer": "bench/sanitize_results.py v3",
     "source_bytes": 13786,
     "source_name": "2026-06-11-locomo-retrieval-track.json",
     "source_sha256": "eb4b448d6309209c8cf0341de4cb28bf9e9d984675855d276029679b12697698"

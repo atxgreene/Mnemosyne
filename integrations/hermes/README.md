@@ -79,14 +79,14 @@ objects serialized as strings, matching the Hermes v0.21.4 provider contract.
 Standalone contract tests:
 
 ```sh
-python3 integrations/hermes/test_provider.py
+python3 tests/test_hermes_provider.py
 ```
 
 Compatibility test against an actual Hermes v0.21.4 checkout, with a temporary
 isolated `HERMES_HOME`:
 
 ```sh
-python3 integrations/hermes/test_hermes_compat.py \
+python3 tests/test_hermes_compat.py \
   --hermes-root /path/to/hermes-agent-v0.21.4
 ```
 

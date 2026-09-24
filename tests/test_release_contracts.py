@@ -25,6 +25,17 @@ def bare_pypi_claims(text: str) -> list[str]:
     return [match.group(0) for match in _BARE_INSTALL.finditer(logical)]
 
 
+def public_install_surfaces() -> list[Path]:
+    """Return every current public surface that can carry install guidance."""
+    paths = {
+        *(_REPO.glob("*.md")),
+        *((_REPO / "docs").rglob("*.md")),
+        *((_REPO / "docs").rglob("*.html")),
+        _REPO / "integrations" / "hermes" / "README.md",
+    }
+    return sorted(paths)
+
+
 class PublicClaimsTests(unittest.TestCase):
     def test_bare_pypi_detector_catches_quotes_and_extras(self):
         mutations = (
@@ -38,12 +49,43 @@ class PublicClaimsTests(unittest.TestCase):
                 self.assertTrue(bare_pypi_claims(mutation))
 
     def test_current_public_docs_make_no_bare_pypi_claim(self):
-        current_docs = [_REPO / "README.md", *sorted((_REPO / "docs").glob("*.md"))]
         leaks = {
             str(path.relative_to(_REPO)): bare_pypi_claims(path.read_text(encoding="utf-8"))
-            for path in current_docs
+            for path in public_install_surfaces()
         }
         self.assertEqual({path: hits for path, hits in leaks.items() if hits}, {})
+
+    def test_claim_scan_covers_every_install_surface_class(self):
+        relative = {path.relative_to(_REPO) for path in public_install_surfaces()}
+        self.assertIn(Path("README.md"), relative)
+        self.assertIn(Path("RELEASE.md"), relative)
+        self.assertIn(Path("SETUP.md"), relative)
+        self.assertIn(Path("docs/index.html"), relative)
+        self.assertIn(Path("docs/articles/v0.8-launch-substack.md"), relative)
+        self.assertIn(Path("integrations/hermes/README.md"), relative)
+
+    def test_packaged_integration_readme_mutation_catches_quoted_extra(self):
+        readme = (_REPO / "integrations" / "hermes" / "README.md").read_text(
+            encoding="utf-8"
+        )
+        mutation = readme + '\npython3 -m pip install "mnemosyne-harness[train]"\n'
+        self.assertEqual(
+            bare_pypi_claims(mutation),
+            ['pip install "mnemosyne-harness[train]"'],
+        )
+
+    def test_public_commands_use_current_hermes_test_paths(self):
+        public_command_surfaces = {
+            *public_install_surfaces(),
+            *((_REPO / "integrations" / "hermes").glob("*.md")),
+        }
+        joined = "\n".join(
+            path.read_text(encoding="utf-8") for path in public_command_surfaces
+        )
+        self.assertNotIn("integrations/hermes/test_provider.py", joined)
+        self.assertNotIn("integrations/hermes/test_hermes_compat.py", joined)
+        self.assertIn("python3 tests/test_hermes_provider.py", joined)
+        self.assertIn("python3 tests/test_hermes_compat.py", joined)
 
     def test_landing_page_matches_supported_provider_contract(self):
         page = (_REPO / "docs" / "index.html").read_text(encoding="utf-8")
@@ -51,7 +93,12 @@ class PublicClaimsTests(unittest.TestCase):
         self.assertNotIn("2.2–2.5×", page)
         self.assertNotIn("tier 2–5", page)
         self.assertNotIn("Session-end hooks run salient extraction", page)
+        self.assertNotIn("prefetch (non-blocking)", page)
+        self.assertNotIn("fresh-session recall", page)
+        self.assertNotIn("8/8", page)
+        self.assertNotIn("enabled  user  0.1.0  mnemosyne", page)
         self.assertIn("v0.21.4", page)
+        self.assertIn("enabled  user  0.9.8  mnemosyne", page)
         self.assertIn("tiers L2–L4", page)
 
     def test_public_tests_use_neutral_synthetic_identities(self):

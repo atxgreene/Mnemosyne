@@ -9,7 +9,6 @@
     "first_committed_artifact_commit": "9d23404280b49762522241c1d0705f80b55f8325",
     "first_committed_runner_commit": "9d23404280b49762522241c1d0705f80b55f8325",
     "input_price_per_1m_usd": 0.15,
-    "metric_notice": "Legacy values use the retired any-one-token/phrase judge. They are lexical coverage diagnostics, not answer accuracy, and are not comparable to the hardened v0.9.8 judge.",
     "python": "3.11.15",
     "reproduction_commit": "9d23404280b49762522241c1d0705f80b55f8325",
     "retrieval_cost_usd": 0.0,
@@ -18,7 +17,7 @@
   "_provenance": {
     "dataset_text_included": false,
     "per_question_records_omitted": true,
-    "sanitizer": "bench/sanitize_results.py v1 plus legacy-metric relabel migration",
+    "sanitizer": "bench/sanitize_results.py v3",
     "source_bytes": 3064,
     "source_name": "2026-07-01-locomo-efficiency-frontier.json",
     "source_sha256": "c4527967563099015fa24c189805309743ed7f6d44da06926670950b70774700"

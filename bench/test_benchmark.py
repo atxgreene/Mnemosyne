@@ -103,6 +103,93 @@ class SanitizerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside aggregate schema"):
             sanitize_report(raw, source_bytes=b"{}", source_name="raw.json")
 
+    def test_sanitizer_rejects_private_text_in_allowed_scalar_fields(self):
+        mutations = (
+            {"judge": "private dataset question"},
+            {
+                "answer_coverage": {
+                    "rate": 1.0,
+                    "passed": 1,
+                    "total": 1,
+                    "metric": "repeat the private prompt verbatim",
+                    "is_answer_accuracy": False,
+                }
+            },
+            {
+                "adversarial": {
+                    "total": 1,
+                    "scored": 0,
+                    "passed": 0,
+                    "score": None,
+                    "note": "private expected answer",
+                }
+            },
+        )
+        for mutation in mutations:
+            raw = {"_metadata": {"dataset_sha256": "e" * 64}, **mutation}
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                sanitize_report(raw, source_bytes=b"{}", source_name="raw.json")
+
+    def test_sanitizer_rejects_private_run_and_category_names(self):
+        mutations = (
+            {
+                "runs": {
+                    "private-dataset-question": {
+                        "answer_coverage": {"rate": 1.0, "passed": 1, "total": 1}
+                    }
+                }
+            },
+            {
+                "by_category": {
+                    "private-expected-answer": {"coverage_rate": 1.0, "passed": 1, "total": 1}
+                }
+            },
+            {
+                "evidence_recall": {
+                    "mean": 1.0,
+                    "n": 1,
+                    "by_category": {"private-prompt": 1.0},
+                }
+            },
+        )
+        for mutation in mutations:
+            raw = {"_metadata": {"dataset_sha256": "f" * 64}, **mutation}
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                sanitize_report(raw, source_bytes=b"{}", source_name="raw.json")
+
+    def test_sanitizer_omits_unsafe_metadata_free_text(self):
+        raw = {
+            "answer_coverage": {"rate": 1.0, "passed": 1, "total": 1},
+            "_metadata": {
+                "dataset_sha256": "1" * 64,
+                "hardware": "private workstation name and local path",
+                "platform": "private host details",
+                "metric_notice": "private prompt-like prose",
+            },
+        }
+        sanitized = sanitize_report(raw, source_bytes=b"{}", source_name="raw.json")
+        self.assertEqual(sanitized["_metadata"], {"dataset_sha256": "1" * 64})
+
+    def test_validator_rejects_prompt_like_mutations_in_certified_report(self):
+        raw = {
+            "answer_coverage": {"rate": 1.0, "passed": 1, "total": 1},
+            "_metadata": {"dataset_sha256": "2" * 64},
+        }
+        sanitized = sanitize_report(raw, source_bytes=b"{}", source_name="raw.json")
+        mutations = (
+            ("judge", "private prompt text"),
+            ("runs", {"private-run-name": {"samples_run": 1}}),
+            (
+                "by_category",
+                {"private-category": {"coverage_rate": 1.0, "passed": 1, "total": 1}},
+            ),
+        )
+        for key, value in mutations:
+            candidate = json.loads(json.dumps(sanitized))
+            candidate[key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                assert_aggregate_only(candidate)
+
     def test_validator_rejects_unexpected_nested_array_or_object(self):
         raw = {
             "answer_coverage": {"rate": 1.0, "passed": 1, "total": 1},
