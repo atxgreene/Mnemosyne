@@ -24,7 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--hermes-root",
-        default=os.environ.get("HERMES_AGENT_ROOT", "/Users/aj/.hermes/hermes-agent"),
+        default=os.environ.get(
+            "HERMES_AGENT_ROOT", str(Path.home() / ".hermes" / "hermes-agent")
+        ),
     )
     args = parser.parse_args(argv)
     hermes_root = Path(args.hermes_root).expanduser().resolve()
